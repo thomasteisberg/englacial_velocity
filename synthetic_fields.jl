@@ -1,5 +1,4 @@
 using CairoMakie
-using Dierckx
 using DifferentialEquations
 using DomainSets
 using Interpolations
@@ -7,9 +6,11 @@ using MethodOfLines
 using ModelingToolkit
 using NonlinearSolve
 using OrdinaryDiffEq
-using SymbolicNumericIntegration
 using Symbolics
 using Integrals
+
+using PyCall
+scipy_interpolate = pyimport_conda("scipy.interpolate", "scipy")
 
 ## >>> Define domain and flow field parameters <<<
 
@@ -32,11 +33,11 @@ const domain_z = 1500 # meters
 # Various cases you can try below:
 
 # Linearly increasing in X and Z
-u(x, z) = x .* (15 / domain_x) .+ z .* (10 / domain_z)
+#u(x, z) = x .* (15 / domain_x) .+ z .* (10 / domain_z)
 #u(x, z) = x .* (15 / domain_x) .+ z .* (2 / domain_z) .+ 8
 # Increased sliding at the bed in the second half of the domain
-# u(x, z) = (x .* (10 / domain_x) .+ z .* (5 / domain_z)) .+
-#             ((20 ./ (1 .+ exp.(-0.001 .* (x .- 5000)))) .* (1 .- (z ./ domain_z)))
+u(x, z) = (x .* (10 / domain_x) .+ z .* (5 / domain_z)) .+
+            ((5 ./ (1 .+ exp.(-0.001 .* (x .- 5000)))) .* (1 .- (z ./ domain_z)))
 # Sinusoidal variations in bed speed, linearly damped to zero at the surface
 # u(x, z) = (x .* (20 / domain_x) .+ z .* (5 / domain_z)) .+
 #             (((3 .* sin.(2*π*x ./ 4000)) .+ 0) .* exp.(-z/50))
@@ -57,14 +58,7 @@ dudx = eval(dudx_fn)
 
 dwdz(x, z) = -1 * dudx(x, z)
 
-# SymbolicNumericIntegration approach -- sadly doesn't generalize well beacuse of
-# https://github.com/SciML/SymbolicNumericIntegration.jl/issues/31
-# w_sym, _, res = SymbolicNumericIntegration.integrate(dwdz(x, z), z)
-# @assert res == 0 # res is the residual from the symbolic numeric interation. If non-zero, something went wrong
-# w_indef = eval(build_function(w_sym, x, z))
-# w_OLD(x, z) = w_indef(x, z) + w0(x) # Solved up to a constant. Add defined boundary condition
-
-# Pure numerical integration approach
+# Numerical integration approach to find w(x, z) from incompressibility and a boundary condition
 dwdz_inverted_parameters(z, x) = dwdz(x, z)
 function w(x, z)
     prob = IntegralProblem(dwdz_inverted_parameters, 0, z, x)
@@ -82,9 +76,9 @@ end
 # Points are sampled from the initial layers, transported according to the
 # specified flow field, and re-interpolated to generate the layers at t=1 years.
 layer_slope_t0 = -0.01 # rise over run (i.e. meters/meter)
-layer_spacing_t0 = 50 # meters -- vertical spacing between layers at x=0
+layer_spacing_t0 = 100 # meters -- vertical spacing between layers at x=0
 # Number of layers to create. Layers are created starting layer_spacing_t0 meters from the surface
-n_layers = 30
+n_layers = 10
 
 # Horizontal sampling spacing for when we perturb layers by transporting sampled particles
 # from them according to the defined flow field.
@@ -188,42 +182,56 @@ begin
     deformation_xs = deformation_xs[layer_in_ice_mask]
     deformation_zs = deformation_zs[layer_in_ice_mask]
     deformation_delta_l = deformation_delta_l[layer_in_ice_mask]
+    #deformation_delta_l += 0.5 * randn(Float32, size(deformation_delta_l))
+    #deformation_delta_l .+= deformation_xs .* (-1/10000)
 
     deformation_layer_slope = deformation_layer_slope[layer_in_ice_mask]
 end
 
-# Interpolations.jl doesn't support scattered interpolation, so use Dierckx for this
-dl_dt = Dierckx.Spline2D(deformation_xs, deformation_zs, deformation_delta_l, s=1e-0)
-dl_dx = Dierckx.Spline2D(deformation_xs, deformation_zs, deformation_layer_slope, s=1e-0)
-finite_diff_half_length = 1.0
-# Have dl/dt and dl/dx. Just need to calculate the second derivatives.
-# Currently a manual finite difference. Should probably do something better.
-d2l_dxdz(x, z) = (dl_dx(x, z .+ finite_diff_half_length) - dl_dx(x, z .- finite_diff_half_length)) / (2 * finite_diff_half_length)
-d2l_dtdz(x, z) = (dl_dt(x, z .+ finite_diff_half_length) - dl_dt(x, z .- finite_diff_half_length)) / (2 * finite_diff_half_length)
+# Interpolate scatter layer deformation and slope datapoints
+# Choice of interpolation algorithm is hugely important here
+# Eventually need to think carefully about the measurement error model and use
+# that to select an apprpriate interpolation approach.
+#
+# SmoothBivariateSpline is nice in that it produces something tunably smooth
+# and gives easy access to derivatives of the interpolator
+dl_dt_scipy = scipy_interpolate.SmoothBivariateSpline(deformation_xs, deformation_zs, deformation_delta_l,
+                                bbox=(0, domain_x, 0, domain_z))
+dl_dt_scipy_fn(x, z) = dl_dt_scipy(x, z)[1] # Julia function wrapper
+d2l_dtdz(x, z) = dl_dt_scipy.partial_derivative(0,1)(x, z)[1]
 
-begin # Visualize layer vertical motion and verify interpolation
-    clims = (-4, 4)
-    fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1, 1], title="Sampled points and interpolated dl_dt")
-    h = heatmap!(ax, xs, zs, evalgrid(dl_dt, xs, zs), colorrange=clims, colormap=:RdBu_5)
-    Colorbar(fig[1, 2], h, label="Vertical Layer Deformation [m/yr]")
-    scatter!(deformation_xs, deformation_zs, color=deformation_delta_l, colorrange=clims, colormap=:RdBu_5)
-    fig
-end
+dl_dx_scipy = scipy_interpolate.SmoothBivariateSpline(deformation_xs, deformation_zs, deformation_layer_slope,
+                                bbox=(0, domain_x, 0, domain_z))
+dl_dx_scipy_fn(x, z) = dl_dx_scipy(x, z)[1] # Julia function wrapper
+d2l_dxdz(x, z) = dl_dx_scipy.partial_derivative(0,1)(x, z)[1]
 
-## >>> Show single layer deformation <<<
 
-begin
-    layer_idx = round(Int, length(layers_t0)/2)
+# begin # Visualize layer vertical motion and verify interpolation
+#     clims = (-4, 4)
+#     fig = Figure(resolution=(1000, 300))
+#     ax = Axis(fig[1, 1], title="Sampled points and interpolated dl_dt")
+#     h = heatmap!(ax, xs, zs, (@. dl_dt_scipy_fn(xs, zs')), colorrange=clims, colormap=:RdBu_5)
+#     Colorbar(fig[1, 2], h, label="Vertical Layer Deformation [m/yr]")
+#     scatter!(deformation_xs, deformation_zs, color=deformation_delta_l, colorrange=clims, colormap=:RdBu_5)
+#     fig
+# end
 
-    fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1, 1])
+# Zoomed in visualization of just the top part. Useful to check boundary of interpolation
+# begin
+#     fig = Figure(resolution=(1000, 1000))
 
-    plot!(ax, xs, layers_t0[layer_idx](xs))
-    plot!(ax, xs, layers_t1[layer_idx](xs))
+#     clims=(-1.8, -1)
 
-    fig
-end
+#     zs_fine = 0:50:domain_z
+
+#     ax = Axis(fig[1, 1], title="dl / dt")
+#     h = contour!(ax, xs, zs_fine, (@. dl_dt_scipy_fn(xs, zs_fine')), colorrange=clims, levels=clims[1]:0.1:clims[2])
+#     scatter!(ax, deformation_xs, deformation_zs, color=deformation_delta_l, colorrange=clims)
+#     Colorbar(fig[1, 2], h, label="dl_dt [m/yr]")
+#     ylims!(1100,1500)
+#     fig
+# end
+
 
 ## >>> Visualize PDE input fields <<
 
@@ -246,11 +254,11 @@ begin
     Colorbar(fig[2, 2], h, label="d2l_dxdz [m/(m^2)]")
 
     ax = Axis(fig[3, 1], title="dl / dx")
-    h = heatmap!(ax, xs, zs, @. dl_dx(xs, zs'))
+    h = heatmap!(ax, xs, zs, (@. dl_dx_scipy_fn(xs, zs')), colorrange=(-0.3, 0.3), colormap=:RdBu_5)
     Colorbar(fig[3, 2], h, label="dl_dx [m/m]")
 
     ax = Axis(fig[4, 1], title="dl / dt")
-    h = heatmap!(ax, xs, zs, @. dl_dt(xs, zs'))
+    h = heatmap!(ax, xs, zs, (@. dl_dt_scipy_fn(xs, zs')), colorrange=(-4, 4), colormap=:RdBu_5)
     Colorbar(fig[4, 2], h, label="dl_dt [m/yr]")
 
     fig
@@ -274,12 +282,10 @@ Dz = Differential(z)
 
 @register_symbolic d2l_dtdz(x, z)
 @register_symbolic d2l_dxdz(x, z)
-
-dl_dx_fn(x, z) = dl_dx(x, z)
-@register dl_dx_fn(x, z) # An ugly hack -- dl_dx is a Dierckx.Spline2D, which can't be registered directly
+@register dl_dx_scipy_fn(x, z)
 
 # Our PDE
-eq = [d2l_dtdz(x, z) + (u_est(x, z) * d2l_dxdz(x, z)) + (Dz(u_est(x, z)) * dl_dx_fn(x, z)) + Dx(u_est(x, z)) ~ 0]
+eq = [d2l_dtdz(x, z) + (u_est(x, z) * d2l_dxdz(x, z)) + (Dz(u_est(x, z)) * dl_dx_scipy_fn(x, z)) + Dx(u_est(x, z)) ~ 0]
 
 # Boundary conditions
 bcs = [u_est(0, z) ~ u(0, z), # Horizontal velocity at x=0 -- pretty much need this
@@ -322,7 +328,7 @@ begin
 
     # Comparison between the two
     ax = Axis(fig[3, 1], title="solution - true values\n(layers shown as gray lines for reference)")
-    h = heatmap!(ax, sol[x], sol[z], u_sol - u_true, colorrange=(-5, 5), colormap=:RdBu_5)
+    h = heatmap!(ax, sol[x], sol[z], u_sol - u_true, colorrange=(-2, 2), colormap=:RdBu_5)
     Colorbar(fig[3, 2], h, label="Horizontal Velocity Difference [m/yr]")
     ylims!(ax, minimum(sol[z]), maximum(sol[z]))
 
