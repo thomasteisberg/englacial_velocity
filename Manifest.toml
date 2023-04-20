@@ -2,7 +2,7 @@
 
 julia_version = "1.8.5"
 manifest_format = "2.0"
-project_hash = "be01934a73e21eed0593981eb597825f633067d0"
+project_hash = "d46e6c4e12c9857bb8687f8fe0df072c2888df53"
 
 [[deps.AbstractAlgebra]]
 deps = ["GroupsCore", "InteractiveUtils", "LinearAlgebra", "MacroTools", "Markdown", "Random", "RandomExtensions", "SparseArrays", "Test"]
@@ -259,6 +259,12 @@ deps = ["Static", "StaticArrayInterface"]
 git-tree-sha1 = "70232f82ffaab9dc52585e0dd043b5e0c6b714f1"
 uuid = "fb6a15b2-703c-40df-9091-08a04967cfa9"
 version = "0.1.12"
+
+[[deps.CodeTracking]]
+deps = ["InteractiveUtils", "UUIDs"]
+git-tree-sha1 = "d730914ef30a06732bdd9f763f6cc32e92ffbff1"
+uuid = "da1fd8a2-8d9e-5ec2-8556-3022fb5608a2"
+version = "1.3.1"
 
 [[deps.ColorBrewer]]
 deps = ["Colors", "JSON", "Test"]
@@ -974,6 +980,12 @@ git-tree-sha1 = "0f6545dd63fec03d0cfe0c1d28f851e2d804e942"
 uuid = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
 version = "1.0.25"
 
+[[deps.JuliaInterpreter]]
+deps = ["CodeTracking", "InteractiveUtils", "Random", "UUIDs"]
+git-tree-sha1 = "6a125e6a4cb391e0b9adbd1afa9e771c2179f8ef"
+uuid = "aa1ae85d-cabe-5617-a682-6adf51b2e16a"
+version = "0.9.23"
+
 [[deps.JumpProcesses]]
 deps = ["ArrayInterface", "DataStructures", "DiffEqBase", "DocStringExtensions", "FunctionWrappers", "Graphs", "LinearAlgebra", "Markdown", "PoissonRandom", "Random", "RandomNumbers", "RecursiveArrayTools", "Reexport", "SciMLBase", "StaticArrays", "TreeViews", "UnPack"]
 git-tree-sha1 = "740c685ba3d7f218663436b2152041563c19db6e"
@@ -1213,6 +1225,12 @@ deps = ["FFTW", "FillArrays", "LinearAlgebra", "Nullables", "Random", "SparseArr
 git-tree-sha1 = "bc0221650552251852342c47c2e82246ed5c98ff"
 uuid = "898213cb-b102-5a47-900c-97e73b919f73"
 version = "0.5.3"
+
+[[deps.LoweredCodeUtils]]
+deps = ["JuliaInterpreter"]
+git-tree-sha1 = "60168780555f3e663c536500aa790b6368adc02a"
+uuid = "6f1432cf-f94c-5a45-995e-cdbf5db27b0b"
+version = "2.3.0"
 
 [[deps.Lux]]
 deps = ["Adapt", "ChainRulesCore", "Functors", "LinearAlgebra", "LuxCUDA", "LuxCore", "LuxLib", "Markdown", "NNlib", "Optimisers", "Random", "Requires", "Setfield", "SparseArrays", "Statistics", "TruncatedStacktraces"]
@@ -1770,6 +1788,12 @@ deps = ["ChainRulesCore", "DiffResults", "DiffRules", "ForwardDiff", "FunctionWr
 git-tree-sha1 = "afc870db2b2c2df1ba3f7b199278bb071e4f6f90"
 uuid = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
 version = "1.14.4"
+
+[[deps.Revise]]
+deps = ["CodeTracking", "Distributed", "FileWatching", "JuliaInterpreter", "LibGit2", "LoweredCodeUtils", "OrderedCollections", "Pkg", "REPL", "Requires", "UUIDs", "Unicode"]
+git-tree-sha1 = "feafdc70b2e6684314e188d95fe66d116de834a7"
+uuid = "295af30f-e4ad-537b-8983-00126c2a3abe"
+version = "3.5.2"
 
 [[deps.Rmath]]
 deps = ["Random", "Rmath_jll"]
