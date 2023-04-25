@@ -4,6 +4,10 @@ using CairoMakie
 using Symbolics
 using OrderedCollections
 
+ENV["PYTHON"] = ""
+using PyCall
+scipy_interpolate = pyimport_conda("scipy.interpolate", "scipy")
+
 includet("sia.jl")
 includet("age_depth.jl")
 includet("plot_helpers.jl")
@@ -46,8 +50,20 @@ to_plot = OrderedDict(
         ("w (Vertical Velocity)", "w [m/a]") => (@. w(xs, zs')) * seconds_per_year,
         ("du/dx", "du/dx [a^-1]") => (@. dudx(xs, zs')) * seconds_per_year,
     )
-
+;
 fig = plot_fields(to_plot)
+
+# w needs to be registered to be used in a PDESystem equation
+# But it can't be registered after it's returned by a function, apparently
+# 
+# Approach 1: (kind of silly but simple workaround)
+w_reg(x, z) = w(x, z)
+@register w_reg(x, z)
+
+# Create interpolation of w
+w_scipy = scipy_interpolate.RectBivariateSpline(xs, zs, (@. w(xs, zs')), bbox=(0, domain_x, 0, domain_z))
+w_scipy_fn(x, z) = w_scipy(x, z)[1]
+@register w_scipy_fn(x, z)
 
 ## Run age-depth model and generate layer lines
 
@@ -57,9 +73,14 @@ fig = plot_fields(to_plot)
 # But it can't be registered after it's returned by a function, apparently
 # This is an ugly workaround for now
 # TODO: Figure out the right way to do this
-w_reg = w(x, z)
+w_reg(x, z) = w(x, z)
 @register w_reg(x, z)
 
-age_xs, age_zs, age = age_depth((x, z), u, w_reg, domain_x, domain_z)
+# Old version that applies zero age at fixed z
+#age_xs, age_zs, age = age_depth((x, z), u, w_scipy_fn, domain_x, domain_z)
 
-fig = plot_age(age_xs, age_zs, age)
+# Curvilinear grid solution applying zero age at surface(x)
+age_xs, age_zs, age = age_depth_curvilinear((x, z), u, w_reg, domain_x, surface, dsdx,
+                        fd_dq = 0.1, fd_dp = 500.0, output_dx = 100.0, output_dz = 40.0)
+
+fig = plot_age(age_xs, age_zs, age, contour=false, colorrange=(0, 200))
