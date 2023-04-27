@@ -8,6 +8,8 @@ scipy_interpolate = pyimport_conda("scipy.interpolate", "scipy")
 function age_depth(spatial_parameters::Tuple{Num, Num}, u, w,
     domain_x::Float64, domain_z::Float64)
 
+    println("This function is just for comparison. You should probably use age_depth_curvilinear")
+
     seconds_per_year = 60 * 60 * 24 * 365.0 # m/s to m/yr conversion
 
     x, z = spatial_parameters
@@ -22,7 +24,7 @@ function age_depth(spatial_parameters::Tuple{Num, Num}, u, w,
     eq = [seconds_per_year * u(x,z) * Dx(age(x, z)) + seconds_per_year * w(x, z) * Dz(age(x, z)) ~ 1.0]
 
     # Boundary condition -- surface is age 0
-    # TODO: Use actual surface contour?
+    # Note: does not use surface contour -- use age_depth_curvilinear for that
     bcs = [age(x, domain_z) ~ 0]
 
     # Domain must be rectangular. Defined based on prior parameters
@@ -58,10 +60,6 @@ function age_depth_curvilinear(spatial_parameters::Tuple{Num, Num}, u, w,
     x, z = spatial_parameters
 
     @parameters p q # Curvilinear grid parameters
-    to_p(x) = x
-    to_x(p) = p
-    to_q(x, z) = z / surface(x)
-    to_z(x, z) = z * surface(x)
     # p = x
     # q = z/surface(x)
     @variables age(..)
@@ -70,14 +68,10 @@ function age_depth_curvilinear(spatial_parameters::Tuple{Num, Num}, u, w,
     Dp = Differential(p)
     Dq = Differential(q)
 
-    # @register_symbolic to_x(p)
-    # @register_symbolic to_z(p, q)
-
     # Age depth equation in steady state (DA/dt=0)
     eq = [u(p, q * surface(p)) * (Dp(age(p, q)) - Dq(age(p, q)) * (q * surface(p) * dsdx(p) * (surface(p))^-2)) + w(p, q * surface(p)) * Dq(age(p, q)) * (surface(p))^-1 ~ 1.0 / seconds_per_year]
 
     # Boundary condition -- surface is age 0
-    # TODO: Use actual surface contour?
     bcs = [age(p, 1.0) ~ 0]
 
     # Domain must be rectangular. Defined based on prior parameters

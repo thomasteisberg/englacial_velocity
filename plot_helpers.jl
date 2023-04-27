@@ -2,7 +2,7 @@ using CairoMakie
 using OrderedCollections
 
 
-function plot_fields(to_plot::OrderedDict)
+function plot_fields(xs, zs, to_plot::OrderedDict)
     fig = Figure(resolution=(1000, 300*length(to_plot)))
 
     for (idx, titles) in enumerate(keys(to_plot))
