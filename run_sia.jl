@@ -93,6 +93,7 @@ begin
     for l in layers
         lines!(ax, xs, l(xs))
     end
+    ylims!(0,domain_z)
     fig
 end
 
@@ -100,31 +101,85 @@ end
 ## Alternative layers based on particle flow
 #  ===
 
-layer_ages_tmp = 100:100:500
-layers_t0 = repeat([surface], length(layer_ages_tmp))
+#layer_ages_tmp = 100:500:10000
+#layers_t0 = repeat([surface], length(layer_ages_tmp))
 u_meters_per_year(x, z) = u(x, z) * seconds_per_year
-w_meters_per_year(x, z) = w_scipy_fn(x, z) * seconds_per_year
+w_meters_per_year(x, z) = w_reg(x, z) * seconds_per_year
 
+#layers = advect_layers(u_meters_per_year, w_meters_per_year, age_xs, surface, layer_ages)
+layers = advect_layers(u, w, age_xs, surface, layer_ages*seconds_per_year)
 
-# TEST
-xs = ages_xs
-zs = @. surface(xs)
-u0 = vcat(xs, zs)
-
-function layer_velocity!(dxz, xz, p, t)
-    # xy[1] is x, xy[2] is y
-    dxz[1,:] = u_meters_per_year(xz[1,:], xz[2,:])
-    dxz[2,:] = w_meters_per_year(xz[1,:], xz[2,:])
+begin
+    fig = Figure(resolution=(1000, 300))
+    ax = Axis(fig[1, 1])
+    for l in layers
+        lines!(ax, xs, l(xs))
+    end
+    ylims!(0,domain_z)
+    fig
 end
 
-prob = ODEProblem(layer_velocity!, u0, (0.0, 10.0))
 
-sol = solve(prob)
+# TEST
+surf_z = @. surface(age_xs)
+u0 = vcat(age_xs', surf_z')
+
+layers = Vector{Function}(undef, length(layer_ages_tmp))
+
+function layer_velocity!(dxz, xz, p, t)
+    # xz[1,:] is x, xz[2,:] is z
+    dxz[1,:] = @. u_meters_per_year(xz[1,:], xz[2,:])
+    dxz[2,:] = @. w_meters_per_year(xz[1,:], xz[2,:])
+end
+
+function simple_integration(u0, du_fn!::Function, t_end, dt)
+    u = copy(u0)
+    du = copy(u0)
+    for t in 0:dt:t_end
+        du_fn!(du, u, nothing, nothing)
+        if sum(abs.(du) .> 10) > 0
+            println(du)
+            return nothing
+        end
+        u = u + du * dt
+    end
+    return u
+end 
+
+prob = ODEProblem(layer_velocity!, u0, (0.0, 1.0))
+t0 = 0.0
+
+for (layer_idx, layer_t) in enumerate(layer_ages_tmp)
+    Δt = layer_t - t0
+    
+    prob = remake(prob, u0=u0, tspan=(0.0, Δt))
+    sol = solve(prob)
+    interp = scipy_interpolate.interp1d(sol.u[end][1,:], sol.u[end][2,:], kind="linear", fill_value="extrapolate")
+
+    # println((layer_idx, layer_t))
+    # u1 = simple_integration(u0, layer_velocity!, layer_t, 1)
+    # interp = scipy_interpolate.interp1d(u1[1,:], u1[2,:], kind="linear", fill_value="extrapolate")
+
+    layers[layer_idx] = interp
+
+    t0 = layer_t
+
+    layer_z = interp(age_xs)
+    u0 = vcat(age_xs', layer_z')
+end
+
+begin
+    fig = Figure(resolution=(1000, 300))
+    ax = Axis(fig[1,1])
+    lines!(ax, xs, (@. u_meters_per_year(xs, surface(xs))), label="u")
+    lines!(ax, xs, (@. w_meters_per_year(xs, surface(xs))), label="w")
+    fig
+end
 
 # TEST
 
 
-layers = advect_layers(u_meters_per_year, w_meters_per_year, age_xs, layers_t0, layer_ages)
+layers = advect_layers(u_meters_per_year, w_meters_per_year, age_xs, surface, layer_ages)
 
 begin
     fig = Figure(resolution=(1000, 300))
@@ -134,6 +189,16 @@ begin
     end
     fig
 end
+
+
+to_plot = OrderedDict(
+        ("u (Horizontal Velocity)", "u [m/a]") => (@. u_meters_per_year(xs, zs')),
+        ("w (Vertical Velocity)", "w [m/a]") => (@. w_meters_per_year(xs, zs'))
+    )
+;
+test_plot_xs = -1000.0:100.0:11000.0
+test_plot_zs = -100.0:50.0:1600.0
+fig = plot_fields(test_plot_xs, test_plot_zs, to_plot)
 
 # TODO
 
