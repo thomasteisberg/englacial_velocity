@@ -73,49 +73,47 @@ function advect_layer(u, w, xs, initial_layer, layer_ages)
     return layers
 end
 
+function estimate_layer_deformation(u::Function, w::Function, xs, layers_t0)
+    layers_t1 = Vector{Union{Function, PyObject}}(undef, length(layers_t0))
 
-# function advect_layers(u, w, xs, layers, delta_ts)
-#     function layer_velocity!(dxy, xy, p, t)
-#         # xy[1] is x, xy[2] is y
-#         dxy[1] = u(xy[1], xy[2])
-#         dxy[2] = w(xy[1], xy[2])
-#     end
+    for i in 1:length(layer_ages)
+        layers_t1[i] = advect_layer(u, w, xs, layers_t0[i], 1.0*seconds_per_year)[1]
+    end
 
-#     # Dummy ODE problem defining the problem structure. We'll remake this problem
-#     # with new initial conditions for each layer particle.
-#     prob = ODEProblem(layer_velocity!, [0; 0], (0.0, 1.0))
-#     layers_advected = Array{Any}(undef, length(layers_t0))
-    
-#     for (layer_idx, layer) in enumerate(layers)
-#         function prob_func(prob, i, repeat)
-#             x = 0#xs[i]
-#             remake(prob, u0=[x; layer(x)], tspan=(0.0, delta_ts[layer_idx]))
-#         end
+    begin
+        deformation_xs = collect(Iterators.flatten(
+            [collect(xs * 1.0) for i in eachindex(layers_t0)]))
+        deformation_zs = collect(Iterators.flatten(
+            [(layers_t1[i](xs) + layers_t0[i](xs)) / 2 for i in eachindex(layers_t0)]))
+        deformation_delta_l = collect(Iterators.flatten(
+            [layers_t1[i](xs) - layers_t0[i](xs) for i in eachindex(layers_t0)]))
 
-#         layer_prob = EnsembleProblem(prob, prob_func=prob_func)
-#         sol = solve(layer_prob, trajectories=length(xs))
+        deformation_layer_slope = collect(Iterators.flatten(
+            [(layers_t1[i](xs .+ 1.0) - layers_t1[i](xs) + layers_t0[i](xs .+ 1.0) - layers_t0[i](xs)) / 2 for i in eachindex(layers_t0)]))
+    end
 
-#         transformed_layer_xs = [sol[i].u[end][1] for i = 1:length(xs)]
-#         transformed_layer_zs = [sol[i].u[end][2] for i = 1:length(xs)]
+    # Interpolate scatter layer deformation and slope datapoints
+    # Choice of interpolation algorithm is hugely important here
+    # Eventually need to think carefully about the measurement error model and use
+    # that to select an apprpriate interpolation approach.
+    #
+    # SmoothBivariateSpline is nice in that it produces something tunably smooth
+    # and gives easy access to derivatives of the interpolator
+    dl_dt_scipy = scipy_interpolate.SmoothBivariateSpline(deformation_xs, deformation_zs, deformation_delta_l,
+                                    bbox=(0, domain_x, 0, domain_z))
+    dl_dt_scipy_fn(x, z) = dl_dt_scipy(x, z)[1] # Julia function wrapper
+    d2l_dtdz(x, z) = dl_dt_scipy.partial_derivative(0,1)(x, z)[1]
 
-#         # interp = scipy_interpolate.interp1d(transformed_layer_xs, transformed_layer_zs, kind="linear", fill_value="extrapolate")
-#         # function l(x)
-#         #     res = interp(x)
-#         #     if length(x) == 1
-#         #         return res[1]
-#         #     else
-#         #         return res
-#         #     end
-#         # end
+    dl_dx_scipy = scipy_interpolate.SmoothBivariateSpline(deformation_xs, deformation_zs, deformation_layer_slope,
+                                    bbox=(0, domain_x, 0, domain_z))
+    dl_dx_scipy_fn(x, z) = dl_dx_scipy(x, z)[1] # Julia function wrapper
+    d2l_dxdz(x, z) = dl_dx_scipy.partial_derivative(0,1)(x, z)[1]
 
-#         # layers_advected[layer_idx] = l
-#         #layers_advected[layer_idx] = linear_interpolation(transformed_layer_xs, transformed_layer_zs, extrapolation_bc=Line())
-#     end
-
-#     return layers_advected
-# end
+    return (dl_dt_scipy_fn, d2l_dtdz, dl_dx_scipy_fn, d2l_dxdz)
+end
 
 function horizontal_velocity(spatial_parameters::Tuple{Num, Num},
+    u::Function,
     d2l_dtdz::Function, d2l_dxdz::Function, dl_dx::Function;
     dx::Float64 = 750.0, dz::Float64 = 50.0)
     # PDE we want to solve:
@@ -139,7 +137,7 @@ function horizontal_velocity(spatial_parameters::Tuple{Num, Num},
 
     # Boundary conditions
     bcs = [u_est(0, z) ~ u(0, z), # Horizontal velocity at x=0 -- pretty much need this
-           u_est(x, domain_z) ~ u(x, domain_z)] # Horizontal velocity along the surface -- less necessary -- inteesting to play with this
+           u_est(x, domain_z) ~ u(x, domain_z) * seconds_per_year] # Horizontal velocity along the surface -- less necessary -- inteesting to play with this
 
     # Domain must be rectangular. Defined based on prior parameters
     domains = [x ∈ Interval(0.0, domain_x),
@@ -152,18 +150,17 @@ function horizontal_velocity(spatial_parameters::Tuple{Num, Num},
 
     prob = discretize(pdesys, discretization, progress=true)
 
-    # TODO: Think about appropriate solver algorithm. Auto-selection picks different options.
-    sol = solve(prob)
+    sol = solve(prob, NewtonRaphson())
     
-    return sol
+    return u_est, sol
 end
 
-function plot_horizontal_velocity_result(x, z, sol, layers, u::Function)
+function plot_horizontal_velocity_result(x, z, u_est, sol, layers, u::Function)
     # Visualize result and compare with ground truth
 
     u_sol = sol[u_est(x, z)] # solver result on discretized grid
 
-    u_true = u(sol[x], sol[z]') # Ground truth on PDE solution grid
+    u_true = (@. u(sol[x], sol[z]')) * seconds_per_year # Ground truth on PDE solution grid
     clims = (0, max(maximum(u_sol), maximum(u_true)))
     #clims = (0, maximum(u_true))
 
@@ -184,8 +181,8 @@ function plot_horizontal_velocity_result(x, z, sol, layers, u::Function)
     ylims!(ax, minimum(sol[z]), maximum(sol[z]))
 
     # Show layers for reference
-    for (l_t0, l_t1) in zip(layers_t0, layers_t1)
-        lines!(ax, xs, l_t0(xs), color=:gray, linestyle=:dash)
+    for l in layers
+        lines!(ax, xs, l(xs), color=:gray, linestyle=:dash)
     end
 
     fig

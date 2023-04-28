@@ -104,7 +104,7 @@ w_scipy_fn(x, z) = w_scipy(x, z)[1]
 ## Alternative layers based on particle flow
 #  ===
 
-layer_ages = 0:250:20000
+layer_ages = 0:500:20000
 layers_t0 = advect_layer(u, w, xs, surface, layer_ages*seconds_per_year)
 
 begin
@@ -121,67 +121,68 @@ end
 ## Estimate layer deformation
 #  ==========================
 
-layers_t1 = Vector{Union{Function, PyObject}}(undef, length(layer_ages))
+# layers_t1 = Vector{Union{Function, PyObject}}(undef, length(layer_ages))
 
-for i in 1:length(layer_ages)
-    layers_t1[i] = advect_layer(u, w, xs, layers_t0[i], 1.0*seconds_per_year)[1]
-end
+# for i in 1:length(layer_ages)
+#     layers_t1[i] = advect_layer(u, w, xs, layers_t0[i], 1.0*seconds_per_year)[1]
+# end
 
-begin
-    deformation_xs = collect(Iterators.flatten(
-        [collect(xs * 1.0) for i in eachindex(layers_t0)]))
-    deformation_zs = collect(Iterators.flatten(
-        [(layers_t1[i](xs) + layers_t0[i](xs)) / 2 for i in eachindex(layers_t0)]))
-    deformation_delta_l = collect(Iterators.flatten(
-        [layers_t1[i](xs) - layers_t0[i](xs) for i in eachindex(layers_t0)]))
+# begin
+#     deformation_xs = collect(Iterators.flatten(
+#         [collect(xs * 1.0) for i in eachindex(layers_t0)]))
+#     deformation_zs = collect(Iterators.flatten(
+#         [(layers_t1[i](xs) + layers_t0[i](xs)) / 2 for i in eachindex(layers_t0)]))
+#     deformation_delta_l = collect(Iterators.flatten(
+#         [layers_t1[i](xs) - layers_t0[i](xs) for i in eachindex(layers_t0)]))
 
-    deformation_layer_slope = collect(Iterators.flatten(
-        [(layers_t1[i](xs .+ 1.0) - layers_t1[i](xs) + layers_t0[i](xs .+ 1.0) - layers_t0[i](xs)) / 2 for i in eachindex(layers_t0)]))
-end
+#     deformation_layer_slope = collect(Iterators.flatten(
+#         [(layers_t1[i](xs .+ 1.0) - layers_t1[i](xs) + layers_t0[i](xs .+ 1.0) - layers_t0[i](xs)) / 2 for i in eachindex(layers_t0)]))
+# end
 
-# Interpolate scatter layer deformation and slope datapoints
-# Choice of interpolation algorithm is hugely important here
-# Eventually need to think carefully about the measurement error model and use
-# that to select an apprpriate interpolation approach.
-#
-# SmoothBivariateSpline is nice in that it produces something tunably smooth
-# and gives easy access to derivatives of the interpolator
-dl_dt_scipy = scipy_interpolate.SmoothBivariateSpline(deformation_xs, deformation_zs, deformation_delta_l,
-                                bbox=(0, domain_x, 0, domain_z))
-dl_dt_scipy_fn(x, z) = dl_dt_scipy(x, z)[1] # Julia function wrapper
-d2l_dtdz(x, z) = dl_dt_scipy.partial_derivative(0,1)(x, z)[1]
+# # Interpolate scatter layer deformation and slope datapoints
+# # Choice of interpolation algorithm is hugely important here
+# # Eventually need to think carefully about the measurement error model and use
+# # that to select an apprpriate interpolation approach.
+# #
+# # SmoothBivariateSpline is nice in that it produces something tunably smooth
+# # and gives easy access to derivatives of the interpolator
+# dl_dt_scipy = scipy_interpolate.SmoothBivariateSpline(deformation_xs, deformation_zs, deformation_delta_l,
+#                                 bbox=(0, domain_x, 0, domain_z))
+# dl_dt_scipy_fn(x, z) = dl_dt_scipy(x, z)[1] # Julia function wrapper
+# d2l_dtdz(x, z) = dl_dt_scipy.partial_derivative(0,1)(x, z)[1]
 
-dl_dx_scipy = scipy_interpolate.SmoothBivariateSpline(deformation_xs, deformation_zs, deformation_layer_slope,
-                                bbox=(0, domain_x, 0, domain_z))
-dl_dx_scipy_fn(x, z) = dl_dx_scipy(x, z)[1] # Julia function wrapper
-d2l_dxdz(x, z) = dl_dx_scipy.partial_derivative(0,1)(x, z)[1]
+# dl_dx_scipy = scipy_interpolate.SmoothBivariateSpline(deformation_xs, deformation_zs, deformation_layer_slope,
+#                                 bbox=(0, domain_x, 0, domain_z))
+# dl_dx_scipy_fn(x, z) = dl_dx_scipy(x, z)[1] # Julia function wrapper
+# d2l_dxdz(x, z) = dl_dx_scipy.partial_derivative(0,1)(x, z)[1]
 
+dl_dt, d2l_dtdz, dl_dx, d2l_dxdz = estimate_layer_deformation(u, w, xs, layers_t0)
 
-begin # Visualize layer vertical motion and verify interpolation
-    clims = (-4, 4)
-    fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1, 1], title="Sampled points and interpolated dl_dt")
-    h = heatmap!(ax, xs, zs, (@. dl_dt_scipy_fn(xs, zs')), colorrange=clims, colormap=:RdBu_5)
-    Colorbar(fig[1, 2], h, label="Vertical Layer Deformation [m/yr]")
-    scatter!(deformation_xs, deformation_zs, color=deformation_delta_l, colorrange=clims, colormap=:RdBu_5)
-    fig
-end
+# begin # Visualize layer vertical motion and verify interpolation
+#     clims = (-4, 4)
+#     fig = Figure(resolution=(1000, 300))
+#     ax = Axis(fig[1, 1], title="Sampled points and interpolated dl_dt")
+#     h = heatmap!(ax, xs, zs, (@. dl_dt(xs, zs')), colorrange=clims, colormap=:RdBu_5)
+#     Colorbar(fig[1, 2], h, label="Vertical Layer Deformation [m/yr]")
+#     scatter!(deformation_xs, deformation_zs, color=deformation_delta_l, colorrange=clims, colormap=:RdBu_5)
+#     fig
+# end
 
-# Zoomed in visualization of just the top part. Useful to check boundary of interpolation
-begin
-    fig = Figure(resolution=(1000, 1000))
+# # Zoomed in visualization of just the top part. Useful to check boundary of interpolation
+# begin
+#     fig = Figure(resolution=(1000, 1000))
 
-    clims=(-1.8, 1.8)
+#     clims=(-1.8, 1.8)
 
-    zs_fine = 0:50:domain_z
+#     zs_fine = 0:50:domain_z
 
-    ax = Axis(fig[1, 1], title="dl / dt")
-    h = contour!(ax, xs, zs_fine, (@. dl_dt_scipy_fn(xs, zs_fine')), colorrange=clims, levels=clims[1]:0.1:clims[2])
-    scatter!(ax, deformation_xs, deformation_zs, color=deformation_delta_l, colorrange=clims)
-    Colorbar(fig[1, 2], h, label="dl_dt [m/yr]")
-    ylims!(1000,1500)
-    fig
-end
+#     ax = Axis(fig[1, 1], title="dl / dt")
+#     h = contour!(ax, xs, zs_fine, (@. dl_dt(xs, zs_fine')), colorrange=clims, levels=clims[1]:0.1:clims[2])
+#     scatter!(ax, deformation_xs, deformation_zs, color=deformation_delta_l, colorrange=clims)
+#     Colorbar(fig[1, 2], h, label="dl_dt [m/yr]")
+#     ylims!(1000,1500)
+#     fig
+# end
 
 
 ## >>> Visualize PDE input fields <<
@@ -193,33 +194,33 @@ end
 # Not directly an input, but useful to see anyway:
 # dl_dt ✓
 
-begin
-    fig = Figure(resolution=(1000, 1000))
+# begin
+#     fig = Figure(resolution=(1000, 1000))
 
-    ax = Axis(fig[1, 1], title="d^2l / dtdz")
-    h = heatmap!(ax, xs, zs, @. d2l_dtdz(xs, zs'))
-    Colorbar(fig[1, 2], h, label="d2l_dtdz [m/(yr⋅m)]")
+#     ax = Axis(fig[1, 1], title="d^2l / dtdz")
+#     h = heatmap!(ax, xs, zs, @. d2l_dtdz(xs, zs'))
+#     Colorbar(fig[1, 2], h, label="d2l_dtdz [m/(yr⋅m)]")
 
-    ax = Axis(fig[2, 1], title="d^2l / dxdz")
-    h = heatmap!(ax, xs, zs, @. d2l_dxdz(xs, zs'))
-    Colorbar(fig[2, 2], h, label="d2l_dxdz [m/(m^2)]")
+#     ax = Axis(fig[2, 1], title="d^2l / dxdz")
+#     h = heatmap!(ax, xs, zs, @. d2l_dxdz(xs, zs'))
+#     Colorbar(fig[2, 2], h, label="d2l_dxdz [m/(m^2)]")
 
-    ax = Axis(fig[3, 1], title="dl / dx")
-    h = heatmap!(ax, xs, zs, (@. dl_dx_scipy_fn(xs, zs')), colorrange=(-0.3, 0.3), colormap=:RdBu_5)
-    Colorbar(fig[3, 2], h, label="dl_dx [m/m]")
+#     ax = Axis(fig[3, 1], title="dl / dx")
+#     h = heatmap!(ax, xs, zs, (@. dl_dx(xs, zs')), colorrange=(-0.3, 0.3), colormap=:RdBu_5)
+#     Colorbar(fig[3, 2], h, label="dl_dx [m/m]")
 
-    ax = Axis(fig[4, 1], title="dl / dt")
-    h = heatmap!(ax, xs, zs, (@. dl_dt_scipy_fn(xs, zs')), colorrange=(-4, 4), colormap=:RdBu_5)
-    Colorbar(fig[4, 2], h, label="dl_dt [m/yr]")
+#     ax = Axis(fig[4, 1], title="dl / dt")
+#     h = heatmap!(ax, xs, zs, (@. dl_dt(xs, zs')), colorrange=(-4, 4), colormap=:RdBu_5)
+#     Colorbar(fig[4, 2], h, label="dl_dt [m/yr]")
 
-    fig
-end
+#     fig
+# end
 
 to_plot = OrderedDict(
         ("d^2l / dtdz", "d2l_dtdz [m/(yr⋅m)]") => (@. d2l_dtdz(xs, zs')),
         ("d^2l / dxdz", "d2l_dxdz [m/(m^2)]") => (@. d2l_dxdz(xs, zs')),
-        ("dl / dx", "dl_dx [m/m]") => (@. dl_dx_scipy_fn(xs, zs')),
-        ("dl / dt", "dl_dt [m/yr]") => (@. dl_dt_scipy_fn(xs, zs'))
+        ("dl / dx", "dl_dx [m/m]") => (@. dl_dx(xs, zs')),
+        ("dl / dt", "dl_dt [m/yr]") => (@. dl_dt(xs, zs'))
 )
 
 fig = plot_fields(xs, zs, to_plot)
@@ -229,187 +230,205 @@ fig = plot_fields(xs, zs, to_plot)
 ## Solve for horizontal velocity
 #  =============================
 
-## >>> Setup and solve PDE <<<
+d2l_dtdz_reg(x, z) = d2l_dtdz(x, z)
+@register d2l_dtdz_reg(x, z)
+d2l_dxdz_reg(x, z) = d2l_dxdz(x, z)
+@register d2l_dxdz_reg(x, z)
+dl_dx_reg(x, z) = dl_dx(x, z)
+@register dl_dx_reg(x, z)
 
-# PDE we want to solve:
-# d2l_dtdz + (u * d2l_dxdz) + (du_dz * dl_dx) + du_dx = 0
-#
-# Because u(x, z) is an already defined expression (representing "ground truth"),
-# we'll call the thing we're estimating u_est(x, z)
-# Rewritten:
-# d2l_dtdz + (u_est * d2l_dxdz) + (Dz(u_est) * dl_dx) + Dx(u_est) ~ 0
-
-@variables u_est(..)
-
-# Spatial first derivative operators
-Dx = Differential(x)
-Dz = Differential(z)
-
-@register_symbolic d2l_dtdz(x, z)
-@register_symbolic d2l_dxdz(x, z)
-@register dl_dx_scipy_fn(x, z)
-
-# Our PDE
-eq = [d2l_dtdz(x, z) + (u_est(x, z) * d2l_dxdz(x, z)) + (Dz(u_est(x, z)) * dl_dx_scipy_fn(x, z)) + Dx(u_est(x, z)) ~ 0]
-
-# Boundary conditions
-bcs = [u_est(0, z) ~ u(0, z), # Horizontal velocity at x=0 -- pretty much need this
-       u_est(x, domain_z) ~ u(x, domain_z)] # Horizontal velocity along the surface -- less necessary -- inteesting to play with this
-
-# Domain must be rectangular. Defined based on prior parameters
-domains = [x ∈ Interval(0.0, domain_x),
-           z ∈ Interval(0.0, domain_z)]
-
-# x, z are independent variables. Solving for u_est(x, z)
-@named pdesys = PDESystem(eq, bcs, domains, [x, z], [u_est(x, z)])
-
-# Discretization step size
-# Note: These MUST be floats. Easiest thing is just to add a ".0" :)
-dx = 750.0
-dz = 50.0
-
-discretization = MOLFiniteDifference([x => dx, z => dz], nothing, approx_order=2)
-
-prob = discretize(pdesys, discretization, progress=true)
-sol = solve(prob, NewtonRaphson())
-
-u_sol = sol[u_est(x, z)] # solver result on discretized grid
-
-# Visualize result and compare with ground truth
-begin
-    u_true = (@. u(sol[x], sol[z]')) * seconds_per_year # Ground truth on PDE solution grid
-    clims = (0, max(maximum(u_sol), maximum(u_true)))
-    #clims = (0, maximum(u_true))
-
-    fig = Figure(resolution=(1000, 1000))
-    ax = Axis(fig[1, 1], title="PDE solution")
-    h = heatmap!(ax, sol[x], sol[z], u_sol, colorrange=clims)
-    Colorbar(fig[1, 2], h, label="Horizontal Velocity [m/yr]")
-
-    # Ground truth for comparison
-    ax = Axis(fig[2, 1], title="True values")
-    h = heatmap!(ax, sol[x], sol[z], u_true, colorrange=clims)
-    Colorbar(fig[2, 2], h, label="Horizontal Velocity [m/yr]")
-
-    # Comparison between the two
-    ax = Axis(fig[3, 1], title="solution - true values\n(layers shown as gray lines for reference)")
-    h = heatmap!(ax, sol[x], sol[z], u_sol - u_true, colorrange=(-2, 2), colormap=:RdBu_5)
-    Colorbar(fig[3, 2], h, label="Horizontal Velocity Difference [m/yr]")
-    ylims!(ax, minimum(sol[z]), maximum(sol[z]))
-
-    # Show layers for reference
-    for (l_t0, l_t1) in zip(layers_t0, layers_t1)
-        lines!(ax, xs, l_t0(xs), color=:gray, linestyle=:dash)
-    end
-
-    fig
-end
-
-#sol = horizontal_velocity((x, z), d2l_dtdz, d2l_dxdz, dl_dx)
-#fig = plot_horizontal_velocity_result(x, z, sol, layers, u)
-
-#
-# TEST
-#
-#
-
-surf_z = @. surface(age_xs)
-u0 = vcat(age_xs', surf_z')
-
-layers = Vector{Function}(undef, length(layer_ages_tmp))
-
-function layer_velocity!(dxz, xz, p, t)
-    # xz[1,:] is x, xz[2,:] is z
-    dxz[1,:] = @. u_meters_per_year(xz[1,:], xz[2,:])
-    dxz[2,:] = @. w_meters_per_year(xz[1,:], xz[2,:])
-end
-
-function simple_integration(u0, du_fn!::Function, t_end, dt)
-    u = copy(u0)
-    du = copy(u0)
-    for t in 0:dt:t_end
-        du_fn!(du, u, nothing, nothing)
-        if sum(abs.(du) .> 10) > 0
-            println(du)
-            return nothing
-        end
-        u = u + du * dt
-    end
-    return u
-end 
-
-prob = ODEProblem(layer_velocity!, u0, (0.0, 1.0))
-t0 = 0.0
-
-for (layer_idx, layer_t) in enumerate(layer_ages_tmp)
-    Δt = layer_t - t0
-    
-    prob = remake(prob, u0=u0, tspan=(0.0, Δt))
-    sol = solve(prob)
-    interp = scipy_interpolate.interp1d(sol.u[end][1,:], sol.u[end][2,:], kind="linear", fill_value="extrapolate")
-
-    # println((layer_idx, layer_t))
-    # u1 = simple_integration(u0, layer_velocity!, layer_t, 1)
-    # interp = scipy_interpolate.interp1d(u1[1,:], u1[2,:], kind="linear", fill_value="extrapolate")
-
-    layers[layer_idx] = interp
-
-    t0 = layer_t
-
-    layer_z = interp(age_xs)
-    u0 = vcat(age_xs', layer_z')
-end
-
-begin
-    fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1,1])
-    lines!(ax, xs, (@. u_meters_per_year(xs, surface(xs))), label="u")
-    lines!(ax, xs, (@. w_meters_per_year(xs, surface(xs))), label="w")
-    fig
-end
-
-# TEST
-
-
-layers = advect_layers(u_meters_per_year, w_meters_per_year, age_xs, surface, layer_ages)
-
-begin
-    fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1, 1])
-    for l in layers
-        lines!(ax, xs, l(xs))
-    end
-    fig
-end
-
-
-to_plot = OrderedDict(
-        ("u (Horizontal Velocity)", "u [m/a]") => (@. u_meters_per_year(xs, zs')),
-        ("w (Vertical Velocity)", "w [m/a]") => (@. w_meters_per_year(xs, zs'))
-    )
-;
-test_plot_xs = -1000.0:100.0:11000.0
-test_plot_zs = -100.0:50.0:1600.0
-fig = plot_fields(test_plot_xs, test_plot_zs, to_plot)
-
-# TODO
-
-#  ==========================
-## Estimate layer deformation
-#  ==========================
-
-# TODO
+u_est, sol = horizontal_velocity((x, z), u, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg);
+fig = plot_horizontal_velocity_result(x, z, u_est, sol, layers_t0, u)
 
 #  =============================
 ## Solve for horizontal velocity
 #  =============================
 
-#sol = horizontal_velocity((x, z), d2l_dtdz, d2l_dxdz, dl_dx)
-#fig = plot_horizontal_velocity_result(x, z, sol, layers, u)
+# ## >>> Setup and solve PDE <<<
 
-# TODO
+# # PDE we want to solve:
+# # d2l_dtdz + (u * d2l_dxdz) + (du_dz * dl_dx) + du_dx = 0
+# #
+# # Because u(x, z) is an already defined expression (representing "ground truth"),
+# # we'll call the thing we're estimating u_est(x, z)
+# # Rewritten:
+# # d2l_dtdz + (u_est * d2l_dxdz) + (Dz(u_est) * dl_dx) + Dx(u_est) ~ 0
 
+# @variables u_est(..)
+
+# # Spatial first derivative operators
+# Dx = Differential(x)
+# Dz = Differential(z)
 
 # @register_symbolic d2l_dtdz(x, z)
-#     @register_symbolic d2l_dxdz(x, z)
-#     @register dl_dx_scipy_fn(x, z)
+# @register_symbolic d2l_dxdz(x, z)
+# @register dl_dx_scipy_fn(x, z)
+
+# # Our PDE
+# eq = [d2l_dtdz(x, z) + (u_est(x, z) * d2l_dxdz(x, z)) + (Dz(u_est(x, z)) * dl_dx_scipy_fn(x, z)) + Dx(u_est(x, z)) ~ 0]
+
+# # Boundary conditions
+# bcs = [u_est(0, z) ~ u(0, z), # Horizontal velocity at x=0 -- pretty much need this
+#        u_est(x, domain_z) ~ u(x, domain_z)] # Horizontal velocity along the surface -- less necessary -- inteesting to play with this
+
+# # Domain must be rectangular. Defined based on prior parameters
+# domains = [x ∈ Interval(0.0, domain_x),
+#            z ∈ Interval(0.0, domain_z)]
+
+# # x, z are independent variables. Solving for u_est(x, z)
+# @named pdesys = PDESystem(eq, bcs, domains, [x, z], [u_est(x, z)])
+
+# # Discretization step size
+# # Note: These MUST be floats. Easiest thing is just to add a ".0" :)
+# dx = 750.0
+# dz = 50.0
+
+# discretization = MOLFiniteDifference([x => dx, z => dz], nothing, approx_order=2)
+
+# prob = discretize(pdesys, discretization, progress=true)
+# sol = solve(prob, NewtonRaphson())
+
+# u_sol = sol[u_est(x, z)] # solver result on discretized grid
+
+# # Visualize result and compare with ground truth
+# begin
+#     u_true = (@. u(sol[x], sol[z]')) * seconds_per_year # Ground truth on PDE solution grid
+#     clims = (0, max(maximum(u_sol), maximum(u_true)))
+#     #clims = (0, maximum(u_true))
+
+#     fig = Figure(resolution=(1000, 1000))
+#     ax = Axis(fig[1, 1], title="PDE solution")
+#     h = heatmap!(ax, sol[x], sol[z], u_sol, colorrange=clims)
+#     Colorbar(fig[1, 2], h, label="Horizontal Velocity [m/yr]")
+
+#     # Ground truth for comparison
+#     ax = Axis(fig[2, 1], title="True values")
+#     h = heatmap!(ax, sol[x], sol[z], u_true, colorrange=clims)
+#     Colorbar(fig[2, 2], h, label="Horizontal Velocity [m/yr]")
+
+#     # Comparison between the two
+#     ax = Axis(fig[3, 1], title="solution - true values\n(layers shown as gray lines for reference)")
+#     h = heatmap!(ax, sol[x], sol[z], u_sol - u_true, colorrange=(-2, 2), colormap=:RdBu_5)
+#     Colorbar(fig[3, 2], h, label="Horizontal Velocity Difference [m/yr]")
+#     ylims!(ax, minimum(sol[z]), maximum(sol[z]))
+
+#     # Show layers for reference
+#     for (l_t0, l_t1) in zip(layers_t0, layers_t1)
+#         lines!(ax, xs, l_t0(xs), color=:gray, linestyle=:dash)
+#     end
+
+#     fig
+# end
+
+# #  ===
+# ## END
+# #  ===
+
+# #sol = horizontal_velocity((x, z), d2l_dtdz, d2l_dxdz, dl_dx)
+# #fig = plot_horizontal_velocity_result(x, z, sol, layers, u)
+
+# #
+# # TEST
+# #
+# #
+
+# surf_z = @. surface(age_xs)
+# u0 = vcat(age_xs', surf_z')
+
+# layers = Vector{Function}(undef, length(layer_ages_tmp))
+
+# function layer_velocity!(dxz, xz, p, t)
+#     # xz[1,:] is x, xz[2,:] is z
+#     dxz[1,:] = @. u_meters_per_year(xz[1,:], xz[2,:])
+#     dxz[2,:] = @. w_meters_per_year(xz[1,:], xz[2,:])
+# end
+
+# function simple_integration(u0, du_fn!::Function, t_end, dt)
+#     u = copy(u0)
+#     du = copy(u0)
+#     for t in 0:dt:t_end
+#         du_fn!(du, u, nothing, nothing)
+#         if sum(abs.(du) .> 10) > 0
+#             println(du)
+#             return nothing
+#         end
+#         u = u + du * dt
+#     end
+#     return u
+# end 
+
+# prob = ODEProblem(layer_velocity!, u0, (0.0, 1.0))
+# t0 = 0.0
+
+# for (layer_idx, layer_t) in enumerate(layer_ages_tmp)
+#     Δt = layer_t - t0
+    
+#     prob = remake(prob, u0=u0, tspan=(0.0, Δt))
+#     sol = solve(prob)
+#     interp = scipy_interpolate.interp1d(sol.u[end][1,:], sol.u[end][2,:], kind="linear", fill_value="extrapolate")
+
+#     # println((layer_idx, layer_t))
+#     # u1 = simple_integration(u0, layer_velocity!, layer_t, 1)
+#     # interp = scipy_interpolate.interp1d(u1[1,:], u1[2,:], kind="linear", fill_value="extrapolate")
+
+#     layers[layer_idx] = interp
+
+#     t0 = layer_t
+
+#     layer_z = interp(age_xs)
+#     u0 = vcat(age_xs', layer_z')
+# end
+
+# begin
+#     fig = Figure(resolution=(1000, 300))
+#     ax = Axis(fig[1,1])
+#     lines!(ax, xs, (@. u_meters_per_year(xs, surface(xs))), label="u")
+#     lines!(ax, xs, (@. w_meters_per_year(xs, surface(xs))), label="w")
+#     fig
+# end
+
+# # TEST
+
+
+# layers = advect_layers(u_meters_per_year, w_meters_per_year, age_xs, surface, layer_ages)
+
+# begin
+#     fig = Figure(resolution=(1000, 300))
+#     ax = Axis(fig[1, 1])
+#     for l in layers
+#         lines!(ax, xs, l(xs))
+#     end
+#     fig
+# end
+
+
+# to_plot = OrderedDict(
+#         ("u (Horizontal Velocity)", "u [m/a]") => (@. u_meters_per_year(xs, zs')),
+#         ("w (Vertical Velocity)", "w [m/a]") => (@. w_meters_per_year(xs, zs'))
+#     )
+# ;
+# test_plot_xs = -1000.0:100.0:11000.0
+# test_plot_zs = -100.0:50.0:1600.0
+# fig = plot_fields(test_plot_xs, test_plot_zs, to_plot)
+
+# # TODO
+
+# #  ==========================
+# ## Estimate layer deformation
+# #  ==========================
+
+# # TODO
+
+# #  =============================
+# ## Solve for horizontal velocity
+# #  =============================
+
+# #sol = horizontal_velocity((x, z), d2l_dtdz, d2l_dxdz, dl_dx)
+# #fig = plot_horizontal_velocity_result(x, z, sol, layers, u)
+
+# # TODO
+
+
+# # @register_symbolic d2l_dtdz(x, z)
+# #     @register_symbolic d2l_dxdz(x, z)
+# #     @register dl_dx_scipy_fn(x, z)
