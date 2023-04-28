@@ -35,12 +35,17 @@ function layers_from_age_depth(xs, zs, age, layer_ages; edge_effect_m=500)
     return layers, test
 end
 
-function advect_layers(u, w, xs, initial_layer, layer_ages)
-    layer_z = @. initial_layer(xs)
+function advect_layer(u, w, xs, initial_layer, layer_ages)
+    layer_z = Vector{Float64}(undef, length(xs))
+    try
+        layer_z = initial_layer(xs)
+    catch
+        layer_z = @. initial_layer(xs)
+    end
     u0 = vcat(xs', layer_z')
     t0 = 0.0
 
-    layers = Vector{Function}(undef, length(layer_ages))
+    layers = Vector{PyObject}(undef, length(layer_ages))
 
     function layer_velocity!(dxz, xz, p, t)
         # xz[1,:] is x, xz[2,:] is z
