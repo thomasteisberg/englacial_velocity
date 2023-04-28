@@ -78,18 +78,19 @@ w_scipy_fn(x, z) = w_scipy(x, z)[1]
 #age_xs, age_zs, age = age_depth((x, z), u, w_scipy_fn, domain_x, domain_z)
 
 # Curvilinear grid solution applying zero age at surface(x)
+fd_dq, fd_dp = 0.025, 500.0
 age_xs, age_zs, age = age_depth_curvilinear((x, z), u, w_reg, domain_x, surface, dsdx,
-                        fd_dq = 0.1, fd_dp = 500.0, output_dx = 100.0, output_dz = 40.0)
+                        fd_dq = fd_dq, fd_dp = fd_dp, output_dx = 100.0, output_dz = 10.0)
 
-fig = plot_age(age_xs, age_zs, age, contour=false, colorrange=(0, 1000))
-fig = plot_age(age_xs, age_zs, age)
+#fig = plot_age(age_xs, age_zs, age, contour=false, colorrange=(0, 1000))
+fig = plot_age(age_xs, age_zs, age, title=title="Age-depth model\nfd_dq=$fd_dq, fd_dp=$fd_dp")
 
-layer_ages = 100:500:10000
+layer_ages = 0:1000:10000
 layers, test = layers_from_age_depth(age_xs, age_zs, age, layer_ages)
 
 begin
     fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1, 1])
+    ax = Axis(fig[1, 1], title="Layers from age-depth model\nfd_dq=$fd_dq, fd_dp=$fd_dp")
     for l in layers
         lines!(ax, xs, l(xs))
     end
@@ -101,17 +102,11 @@ end
 ## Alternative layers based on particle flow
 #  ===
 
-#layer_ages_tmp = 100:500:10000
-#layers_t0 = repeat([surface], length(layer_ages_tmp))
-u_meters_per_year(x, z) = u(x, z) * seconds_per_year
-w_meters_per_year(x, z) = w_reg(x, z) * seconds_per_year
-
-#layers = advect_layers(u_meters_per_year, w_meters_per_year, age_xs, surface, layer_ages)
 layers = advect_layers(u, w, age_xs, surface, layer_ages*seconds_per_year)
 
 begin
     fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1, 1])
+    ax = Axis(fig[1, 1], title="Layers from particle flow\n(advect_layers)")
     for l in layers
         lines!(ax, xs, l(xs))
     end
@@ -119,8 +114,24 @@ begin
     fig
 end
 
+#  ==========================
+## Estimate layer deformation
+#  ==========================
 
+# TODO
+
+#  =============================
+## Solve for horizontal velocity
+#  =============================
+
+#sol = horizontal_velocity((x, z), d2l_dtdz, d2l_dxdz, dl_dx)
+#fig = plot_horizontal_velocity_result(x, z, sol, layers, u)
+
+#
 # TEST
+#
+#
+
 surf_z = @. surface(age_xs)
 u0 = vcat(age_xs', surf_z')
 

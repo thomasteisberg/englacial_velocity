@@ -110,10 +110,10 @@ function age_depth_curvilinear(spatial_parameters::Tuple{Num, Num}, u, w,
     end
 end
 
-function plot_age(xs, zs, age; contour::Bool = true, colorrange=(0,10000))
+function plot_age(xs, zs, age; contour::Bool = true, colorrange=(0,10000), title="Age depth")
     fig = Figure(resolution=(1000, 300))
 
-    ax = Axis(fig[1, 1], title="Age")
+    ax = Axis(fig[1, 1], title=title)
     if contour
         h = contour!(ax, xs, zs, age,
                         levels=0:200:10000,
