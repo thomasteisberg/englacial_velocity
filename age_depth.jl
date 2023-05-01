@@ -69,7 +69,7 @@ function age_depth_curvilinear(spatial_parameters::Tuple{Num, Num}, u, w,
     Dq = Differential(q)
 
     # Age depth equation in steady state (DA/dt=0)
-    eq = [u(p, q * surface(p)) * (Dp(age(p, q)) - Dq(age(p, q)) * (q * surface(p) * dsdx(p) * (surface(p))^-2)) + w(p, q * surface(p)) * Dq(age(p, q)) * (surface(p))^-1 ~ 1.0 / seconds_per_year]
+    eq = [u(p, q * surface(p)) * (Dp(age(p, q)) - Dq(age(p, q)) * (q * dsdx(p) * (surface(p))^-1)) + w(p, q * surface(p)) * Dq(age(p, q)) * (surface(p))^-1 ~ 1.0 / seconds_per_year]
 
     # Boundary condition -- surface is age 0
     bcs = [age(p, 1.0) ~ 0]

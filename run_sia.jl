@@ -76,10 +76,10 @@ w_scipy_fn(x, z) = w_scipy(x, z)[1]
 #  to layers doesn't work very well. If the grid is too fine, the age-depth
 #  model takes forever to run (and sometimes fails).
 
-# # Old version that applies zero age at fixed z
-# #age_xs, age_zs, age = age_depth((x, z), u, w_scipy_fn, domain_x, domain_z)
+# Old version that applies zero age at fixed z
+#age_xs, age_zs, age = age_depth((x, z), u, w_scipy_fn, domain_x, domain_z)
 
-# # Curvilinear grid solution applying zero age at surface(x)
+# Curvilinear grid solution applying zero age at surface(x)
 # fd_dq, fd_dp = 0.05, 500.0
 # age_xs, age_zs, age = age_depth_curvilinear((x, z), u, w_reg, domain_x, surface, dsdx,
 #                         fd_dq = fd_dq, fd_dp = fd_dp, output_dx = 100.0, output_dz = 10.0)
@@ -181,5 +181,19 @@ d2l_dxdz_reg(x, z) = d2l_dxdz(x, z)
 dl_dx_reg(x, z) = dl_dx(x, z)
 @register dl_dx_reg(x, z)
 
-u_est, sol = horizontal_velocity((x, z), u, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg);
-fig = plot_horizontal_velocity_result(x, z, u_est, sol, layers_t0, u)
+xs_u, zs_u, u_est = horizontal_velocity((x, z), u, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg);
+fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u)
+#fig = plot_horizontal_velocity_result(x, z, u_est, sol, layers_t0, u)
+
+surface_velocity(x) = u(x, surface(x))
+@register surface_velocity(x)
+inflow_velocity(z) = u(0, z)
+@register inflow_velocity(z)
+
+xs_u, zs_u, u_est = horizontal_velocity_curvilinear((x, z), surface_velocity, inflow_velocity, surface, dsdx, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg; u_true=u);
+fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u)
+
+#sol = horizontal_velocity_curvilinear((x, z), surface_velocity, inflow_velocity, surface, dsdx, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg; interpolate_to_xz=false, u_true=u);
+#fig = plot_horizontal_velocity_result(sol[sol.ivs[1]], sol[sol.ivs[2]], sol[sol.dvs[1]], layers_t0, u)
+
+

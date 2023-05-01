@@ -115,7 +115,7 @@ end
 function horizontal_velocity(spatial_parameters::Tuple{Num, Num},
     u::Function,
     d2l_dtdz::Function, d2l_dxdz::Function, dl_dx::Function;
-    dx::Float64 = 750.0, dz::Float64 = 50.0)
+    dx::Float64 = 500.0, dz::Float64 = 50.0)
     # PDE we want to solve:
     # d2l_dtdz + (u * d2l_dxdz) + (du_dz * dl_dx) + du_dx = 0
     #
@@ -136,7 +136,7 @@ function horizontal_velocity(spatial_parameters::Tuple{Num, Num},
     eq = [d2l_dtdz(x, z) + (u_est(x, z) * d2l_dxdz(x, z)) + (Dz(u_est(x, z)) * dl_dx(x, z)) + Dx(u_est(x, z)) ~ 0]
 
     # Boundary conditions
-    bcs = [u_est(0, z) ~ u(0, z), # Horizontal velocity at x=0 -- pretty much need this
+    bcs = [u_est(0, z) ~ u(0, z) * seconds_per_year, # Horizontal velocity at x=0 -- pretty much need this
            u_est(x, domain_z) ~ u(x, domain_z) * seconds_per_year] # Horizontal velocity along the surface -- less necessary -- inteesting to play with this
 
     # Domain must be rectangular. Defined based on prior parameters
@@ -152,33 +152,94 @@ function horizontal_velocity(spatial_parameters::Tuple{Num, Num},
 
     sol = solve(prob, NewtonRaphson())
     
-    return u_est, sol
+    return sol[x], sol[z], sol[u_est(x, z)]
 end
 
-function plot_horizontal_velocity_result(x, z, u_est, sol, layers, u::Function)
+function horizontal_velocity_curvilinear(spatial_parameters::Tuple{Num, Num},
+    surface_velocity, inflow_velocity, surface, dsdx,
+    d2l_dtdz::Function, d2l_dxdz::Function, dl_dx::Function;
+    dp::Float64 = 500.0, dq::Float64 = 50.0/1200.0,
+    interpolate_to_xz::Bool = true, output_dx::Float64 = 200.0, output_dz::Float64 = 50.0,
+    u_true::Function)
+    # PDE we want to solve:
+    # d2l_dtdz + (u * d2l_dxdz) + (du_dz * dl_dx) + du_dx = 0
+    #
+    # Because u(x, z) is an already defined expression (representing "ground truth"),
+    # we'll call the thing we're estimating u_est(x, z)
+    # Rewritten:
+    # d2l_dtdz + (u_est * d2l_dxdz) + (Dz(u_est) * dl_dx) + Dx(u_est) ~ 0
+
+    x, z = spatial_parameters
+
+    @parameters p q
+    @variables u_est(..)
+
+    # Spatial first derivative operators
+    Dp = Differential(p)
+    Dq = Differential(q)
+
+    # Our PDE
+    eq = [d2l_dtdz(p, q * surface(p)) + (u_est(p, q) * d2l_dxdz(p, q * surface(p))) + ((Dq(u_est(p, q)) / surface(p)) * dl_dx(p, q * surface(p))) + (Dp(u_est(p,q)) - Dq(u_est(p,q)) * q * dsdx(p) / surface(p)) ~ 0]
+    # Boundary conditions
+    bcs = [u_est(0, q) ~ inflow_velocity(q) * seconds_per_year,
+           u_est(p, 1.0) ~ surface_velocity(p) * seconds_per_year, # Horizontal velocity along the surface -- less necessary -- inteesting to play with this
+           u_est(p, 0.0) ~ 0.0] # TODO: This shouldn't be necessary. Something is wrong with curvilinear case
+
+    # Domain must be rectangular. Defined based on prior parameters
+    domains = [p ∈ Interval(0.0, domain_x),
+               q ∈ Interval(0.0, 1.0)]
+
+    # x, z are independent variables. Solving for u_est(x, z)
+    @named pdesys = PDESystem(eq, bcs, domains, [p, q], [u_est(p, q)])
+
+    discretization = MOLFiniteDifference([p => dp, q => dq], nothing, approx_order=2)
+
+    prob = discretize(pdesys, discretization, progress=true)
+
+    sol = solve(prob, NewtonRaphson())
+
+    if interpolate_to_xz
+        X = ones(length(sol[q]))' .* sol[p]
+        Q = sol[q]' .* ones(length(sol[p]))
+        Z = Q .* (@. surface(X))
+
+        x_out = 0:output_dx:domain_x
+        z_out = 0:output_dz:maximum(Z)
+        X_out = ones(length(z_out))' .* x_out
+        Z_out = z_out' .* ones(length(x_out))
+
+        u_est_grid = scipy_interpolate.griddata((vec(X), vec(Z)),
+                        vec(sol[u_est(p, q)]),
+                        (X_out, Z_out)) # TODO
+        return x_out, z_out, u_est_grid
+    else # No interpolation, just return data in (p, q) coordinates
+        return sol
+    end
+end
+
+function plot_horizontal_velocity_result(xs, zs, u_sol, layers, u_true_fn::Function)
     # Visualize result and compare with ground truth
 
-    u_sol = sol[u_est(x, z)] # solver result on discretized grid
-
-    u_true = (@. u(sol[x], sol[z]')) * seconds_per_year # Ground truth on PDE solution grid
-    clims = (0, max(maximum(u_sol), maximum(u_true)))
-    #clims = (0, maximum(u_true))
+    u_true = (@. u_true_fn(xs, zs')) * seconds_per_year # Ground truth on PDE solution grid
+    #clims = (0, max(maximum(u_sol[@. ~isnan.(u_sol)]), maximum(u_true)))
+    clims = (0, maximum(u_true))
+    #clims = (0, 10)
 
     fig = Figure(resolution=(1000, 1000))
     ax = Axis(fig[1, 1], title="PDE solution")
-    h = heatmap!(ax, sol[x], sol[z], u_sol, colorrange=clims)
+    h = heatmap!(ax, xs, zs, u_sol, colorrange=clims)
     Colorbar(fig[1, 2], h, label="Horizontal Velocity [m/yr]")
 
     # Ground truth for comparison
     ax = Axis(fig[2, 1], title="True values")
-    h = heatmap!(ax, sol[x], sol[z], u_true, colorrange=clims)
+    h = heatmap!(ax, xs, zs, u_true, colorrange=clims)
     Colorbar(fig[2, 2], h, label="Horizontal Velocity [m/yr]")
 
     # Comparison between the two
     ax = Axis(fig[3, 1], title="solution - true values\n(layers shown as gray lines for reference)")
-    h = heatmap!(ax, sol[x], sol[z], u_sol - u_true, colorrange=(-2, 2), colormap=:RdBu_5)
+    h = heatmap!(ax, xs, zs, u_sol - u_true, colorrange=(-2, 2), colormap=:RdBu_5)
     Colorbar(fig[3, 2], h, label="Horizontal Velocity Difference [m/yr]")
-    ylims!(ax, minimum(sol[z]), maximum(sol[z]))
+    ylims!(ax, minimum(zs), maximum(zs))
 
     # Show layers for reference
     for l in layers
