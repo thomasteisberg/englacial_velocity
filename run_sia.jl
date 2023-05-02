@@ -34,7 +34,8 @@ zs = 0.0:dz:domain_z
 @parameters x z
 
 # Define surface geometry
-surface(x) = domain_z - ((x + 2000.0) / 1500.0)^2.0
+#surface(x) = domain_z - ((x + 2000.0) / 1500.0)^2.0
+surface(x) = domain_z - (x / 1000.0)^2.0
 
 # Build function for surface slope
 
@@ -68,6 +69,8 @@ w_reg(x, z) = w(x, z)
 w_scipy = scipy_interpolate.RectBivariateSpline(xs, zs, (@. w(xs, zs')), bbox=(0, domain_x, 0, domain_z))
 w_scipy_fn(x, z) = w_scipy(x, z)[1]
 @register w_scipy_fn(x, z)
+
+fig
 
 #  ============================================
 ## Run age-depth model and generate layer lines
@@ -104,7 +107,7 @@ w_scipy_fn(x, z) = w_scipy(x, z)[1]
 ## Alternative layers based on particle flow
 #  ===
 
-layer_ages = 0:500:20000
+layer_ages = 0:100:5000
 layers_t0 = advect_layer(u, w, xs, surface, layer_ages*seconds_per_year)
 
 begin
@@ -190,10 +193,52 @@ surface_velocity(x) = u(x, surface(x))
 inflow_velocity(z) = u(0, z)
 @register inflow_velocity(z)
 
-xs_u, zs_u, u_est = horizontal_velocity_curvilinear((x, z), surface_velocity, inflow_velocity, surface, dsdx, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg; u_true=u);
-fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u)
+#xs_u, zs_u, u_est = horizontal_velocity_curvilinear((x, z), surface_velocity, inflow_velocity, surface, dsdx, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg; u_true=u);
+#fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u)
 
 #sol = horizontal_velocity_curvilinear((x, z), surface_velocity, inflow_velocity, surface, dsdx, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg; interpolate_to_xz=false, u_true=u);
 #fig = plot_horizontal_velocity_result(sol[sol.ivs[1]], sol[sol.ivs[2]], sol[sol.dvs[1]], layers_t0, u)
 
+fig
 
+#  =============================
+## Estimate ice effective viscosity
+#  =============================
+
+# Find the finite difference derivatives of u_est with respect to z
+u_true = @. u(xs_u, zs_u') * seconds_per_year
+dudz_fd_true = diff(u_true, dims=2) ./ diff(zs_u)'
+dudz_fd = diff(u_est, dims=2) ./ diff(zs_u)'
+ρ = 917 # kg/m^3
+g = 9.81 # m/s^2
+
+dist_to_surf = (@. surface(xs_u)) .- zs_u'
+diff_tmp = diff(dist_to_surf, dims=2)
+dist_to_surf_fd = dist_to_surf[:, 1:end-1] .+ (diff_tmp ./ 2)
+
+valid_regions_mask = ((xs_u .> 500.0) .& (xs_u .< (domain_x - 500))) .* ((zs_u[1:end-1] .> 200) .& (zs_u[1:end-1] .< (domain_z-100)))'
+
+rheology_eff_stress = (ρ * g * dist_to_surf_fd .* -(@. dsdx(xs_u)))
+rheology_log_eff_stress = log.( rheology_eff_stress[valid_regions_mask] )
+rheology_log_eff_strain = log.( max.((dudz_fd[valid_regions_mask]), 1e-12) )
+
+begin
+    fig = Figure(resolution=(1000, 1000))
+    ax = Axis(fig[1, 1], title="Effective stress vs strain rate")
+    scatter!(ax, rheology_log_eff_stress, rheology_log_eff_strain)
+    #xlims!(-15, -5)
+    fig
+end
+
+masked_dudz_fd = copy(dudz_fd)
+masked_dudz_fd[.! valid_regions_mask] .= 0.0
+masked_dudz_fd_true = copy(dudz_fd_true)
+masked_dudz_fd_true[.! valid_regions_mask] .= 0.0
+
+to_plot = OrderedDict(
+        ("dudz_fd (estimated)", "dudz") => masked_dudz_fd,
+        ("dudz_fd (true)", "dudz") => masked_dudz_fd_true,
+        ("difference", "") => masked_dudz_fd - masked_dudz_fd_true
+)
+
+fig = plot_fields(xs_u, zs_u[1:end-1], to_plot)
