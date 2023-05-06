@@ -3,6 +3,8 @@ using CairoMakie
 using PyCall
 scipy_interpolate = pyimport_conda("scipy.interpolate", "scipy")
 
+using SciMLNLSolve
+
 function layers_from_age_depth(xs, zs, age, layer_ages; edge_effect_m=500)
     layers = Vector{Function}(undef, length(layer_ages))
     test = Vector{Any}(undef, length(layer_ages))
@@ -105,11 +107,103 @@ function estimate_layer_deformation(u::Function, w::Function, xs, layers_t0)
     d2l_dtdz(x, z) = dl_dt_scipy.partial_derivative(0,1)(x, z)[1]
 
     dl_dx_scipy = scipy_interpolate.SmoothBivariateSpline(deformation_xs, deformation_zs, deformation_layer_slope,
-                                    bbox=(0, domain_x, 0, domain_z))
+                                    bbox=(0, domain_x, 0, domain_z),
+                                    w=min.(1 ./ abs.(deformation_layer_slope), 1/0.05)
+                                    )
     dl_dx_scipy_fn(x, z) = dl_dx_scipy(x, z)[1] # Julia function wrapper
     d2l_dxdz(x, z) = dl_dx_scipy.partial_derivative(0,1)(x, z)[1]
 
-    return (dl_dt_scipy_fn, d2l_dtdz, dl_dx_scipy_fn, d2l_dxdz)
+    debugging_dict = Dict(
+        "deformation_xs" => deformation_xs,
+        "deformation_zs" => deformation_zs,
+        "deformation_delta_l" => deformation_delta_l,
+        "deformation_layer_slope" => deformation_layer_slope,
+        "dl_dt_scipy" => dl_dt_scipy,
+        "dl_dx_scipy" => dl_dx_scipy,
+        "dl_dt_scipy_fn" => dl_dt_scipy_fn,
+        "dl_dx_scipy_fn" => dl_dx_scipy_fn,
+        "d2l_dtdz" => d2l_dtdz,
+        "d2l_dxdz" => d2l_dxdz
+    )
+
+    return (dl_dt_scipy_fn, d2l_dtdz, dl_dx_scipy_fn, d2l_dxdz, debugging_dict)
+end
+
+function estimate_layer_deformation_monotone(u::Function, w::Function, xs, zs, layers_t0)
+    layers_t1 = Vector{Union{Function, PyObject}}(undef, length(layers_t0))
+
+    for i in 1:length(layer_ages)
+        layers_t1[i] = advect_layer(u, w, xs, layers_t0[i], 1.0*seconds_per_year)[1]
+    end
+
+    if xs[1] == 0 # x=0 is problematic for interpolation because all of the layers are at z=domain_z
+        xs = xs[2:end]
+    end
+
+    dl_dt_grid = zeros(length(xs), length(zs))
+    d2l_dtdz_grid = zeros(length(xs), length(zs))
+    dl_dx_grid = zeros(length(xs), length(zs))
+    d2l_dxdz_grid = zeros(length(xs), length(zs))
+
+
+    # Monotone cubic spline interpolation to grid data
+    for (x_idx, x) in enumerate(xs)
+        layers_z = [(layers_t1[i](x)[1] + layers_t0[i](x)[1]) / 2 for i in eachindex(layers_t0)]
+        layers_delta_l = [layers_t1[i](x)[1] - layers_t0[i](x)[1] for i in eachindex(layers_t0)]
+        layers_slope = [(layers_t1[i](x + 1.0)[1] - layers_t1[i](x)[1] + layers_t0[i](x + 1.0)[1] - layers_t0[i](x)[1]) / 2 for i in eachindex(layers_t0)]
+
+        dl_dt_interp = scipy_interpolate.PchipInterpolator(layers_z[end:-1:1], layers_delta_l[end:-1:1], extrapolate=true)
+        dl_dt_grid[x_idx, :] = dl_dt_interp(zs)
+        d2l_dtdz_grid[x_idx, :] = dl_dt_interp.derivative(1)(zs)
+
+        dl_dx_interp = scipy_interpolate.PchipInterpolator(layers_z[end:-1:1], layers_slope[end:-1:1], extrapolate=true)
+        dl_dx_grid[x_idx, :] = dl_dx_interp(zs)
+        d2l_dxdz_grid[x_idx, :] = dl_dx_interp.derivative(1)(zs)
+    end
+
+    # Followed by linear interpolation to expand to 2D
+    #X = xs .* ones(length(zs), 1)'
+    #Z = ones(length(xs), 1) .* zs'
+    #print(size(X))
+    #print(size(Z))
+    #print(size(dl_dt_grid))
+    dl_dt_scipy = scipy_interpolate.RegularGridInterpolator((xs, zs), dl_dt_grid, fill_value=nothing, bounds_error=false)
+    dl_dt_scipy_fn(x, z) = dl_dt_scipy([x, z])[1] # Julia function wrapper
+    d2l_dtdz_scipy = scipy_interpolate.RegularGridInterpolator((xs, zs), d2l_dtdz_grid, fill_value=nothing, bounds_error=false)
+    d2l_dtdz(x, z) = d2l_dtdz_scipy([x, z])[1]
+
+    dl_dx_scipy = scipy_interpolate.RegularGridInterpolator((xs, zs), dl_dx_grid, fill_value=nothing, bounds_error=false)
+    dl_dx_scipy_fn(x, z) = dl_dx_scipy([x, z])[1] # Julia function wrapper
+    d2l_dxdz_scipy = scipy_interpolate.RegularGridInterpolator((xs, zs), d2l_dxdz_grid, fill_value=nothing, bounds_error=false)
+    d2l_dxdz(x, z) = d2l_dxdz_scipy([x, z])[1]
+
+    # Only included for debugging comparison
+    begin
+        deformation_xs = collect(Iterators.flatten(
+            [collect(xs * 1.0) for i in eachindex(layers_t0)]))
+        deformation_zs = collect(Iterators.flatten(
+            [(layers_t1[i](xs) + layers_t0[i](xs)) / 2 for i in eachindex(layers_t0)]))
+        deformation_delta_l = collect(Iterators.flatten(
+            [layers_t1[i](xs) - layers_t0[i](xs) for i in eachindex(layers_t0)]))
+
+        deformation_layer_slope = collect(Iterators.flatten(
+            [(layers_t1[i](xs .+ 1.0) - layers_t1[i](xs) + layers_t0[i](xs .+ 1.0) - layers_t0[i](xs)) / 2 for i in eachindex(layers_t0)]))
+    end
+
+    debugging_dict = Dict(
+        "dl_dt_grid" => dl_dt_grid,
+        "d2l_dtdz_grid" => d2l_dtdz_grid,
+        "dl_dx_grid" => dl_dx_grid,
+        "d2l_dxdz_grid" => d2l_dxdz_grid,
+        "deformation_xs" => deformation_xs,
+        "deformation_zs" => deformation_zs,
+        "deformation_delta_l" => deformation_delta_l,
+        "deformation_layer_slope" => deformation_layer_slope,
+    )
+
+    #return debugging_dict
+
+    return (dl_dt_scipy_fn, d2l_dtdz, dl_dx_scipy_fn, d2l_dxdz, debugging_dict)
 end
 
 function horizontal_velocity(spatial_parameters::Tuple{Num, Num},
@@ -158,7 +252,7 @@ end
 function horizontal_velocity_curvilinear(spatial_parameters::Tuple{Num, Num},
     surface_velocity, inflow_velocity, surface, dsdx,
     d2l_dtdz::Function, d2l_dxdz::Function, dl_dx::Function;
-    dp::Float64 = 500.0, dq::Float64 = 50.0/1200.0,
+    dp::Float64 = 400.0, dq::Float64 = 25.0/1200.0,
     interpolate_to_xz::Bool = true, output_dx::Float64 = 200.0, output_dz::Float64 = 50.0,
     u_true::Function)
     # PDE we want to solve:
@@ -181,8 +275,8 @@ function horizontal_velocity_curvilinear(spatial_parameters::Tuple{Num, Num},
     # Our PDE
     eq = [d2l_dtdz(p, q * surface(p)) + (u_est(p, q) * d2l_dxdz(p, q * surface(p))) + ((Dq(u_est(p, q)) / surface(p)) * dl_dx(p, q * surface(p))) + (Dp(u_est(p,q)) - Dq(u_est(p,q)) * q * dsdx(p) / surface(p)) ~ 0]
     # Boundary conditions
-    bcs = [u_est(0, q) ~ inflow_velocity(q) * seconds_per_year,
-           u_est(p, 1.0) ~ surface_velocity(p) * seconds_per_year, # Horizontal velocity along the surface -- less necessary -- inteesting to play with this
+    bcs = [u_est(0, q) ~ inflow_velocity(q * surface(p)) * seconds_per_year,
+           #u_est(p, 1.0) ~ surface_velocity(p) * seconds_per_year, # Horizontal velocity along the surface -- less necessary -- inteesting to play with this
            u_est(p, 0.0) ~ 0.0] # TODO: This shouldn't be necessary. Something is wrong with curvilinear case
 
     # Domain must be rectangular. Defined based on prior parameters
@@ -195,8 +289,9 @@ function horizontal_velocity_curvilinear(spatial_parameters::Tuple{Num, Num},
     discretization = MOLFiniteDifference([p => dp, q => dq], nothing, approx_order=2)
 
     prob = discretize(pdesys, discretization, progress=true)
+    println(typeof(prob))
 
-    sol = solve(prob, NewtonRaphson())
+    sol = MethodOfLines.solve(prob, NLSolveJL())#, NewtonRaphson(diff_type=Val{:central}))
 
     if interpolate_to_xz
         X = ones(length(sol[q]))' .* sol[p]

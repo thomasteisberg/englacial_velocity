@@ -1,6 +1,7 @@
 using Revise
 
 using CairoMakie
+using Colors
 using Symbolics
 using OrderedCollections
 
@@ -124,17 +125,116 @@ end
 ## Estimate layer deformation
 #  ==========================
 
-dl_dt, d2l_dtdz, dl_dx, d2l_dxdz = estimate_layer_deformation(u, w, xs, layers_t0)
+dl_dt, d2l_dtdz, dl_dx, d2l_dxdz, deformation_debug = estimate_layer_deformation(u, w, xs, layers_t0)
 
-# begin # Visualize layer vertical motion and verify interpolation
-#     clims = (-4, 4)
-#     fig = Figure(resolution=(1000, 300))
-#     ax = Axis(fig[1, 1], title="Sampled points and interpolated dl_dt")
-#     h = heatmap!(ax, xs, zs, (@. dl_dt(xs, zs')), colorrange=clims, colormap=:RdBu_5)
-#     Colorbar(fig[1, 2], h, label="Vertical Layer Deformation [m/yr]")
-#     scatter!(deformation_xs, deformation_zs, color=deformation_delta_l, colorrange=clims, colormap=:RdBu_5)
-#     fig
-# end
+dl_dt, d2l_dtdz, dl_dx, d2l_dxdz, deformation_debug = estimate_layer_deformation_monotone(u, w, 0:200:domain_x, 0:10:domain_z, layers_t0)
+
+begin # Visualize layer vertical motion and verify interpolation
+    clims = (-4, 4)
+    fig = Figure(resolution=(1000, 300))
+    ax = Axis(fig[1, 1], title="Sampled points and interpolated dl_dt")
+    h = heatmap!(ax, xs, zs, (@. dl_dt(xs, zs')), colorrange=clims, colormap=:RdBu_5)
+    Colorbar(fig[1, 2], h, label="Vertical Layer Deformation [m/yr]")
+    scatter!(deformation_debug["deformation_xs"], deformation_debug["deformation_zs"], color=deformation_debug["deformation_delta_l"], colorrange=clims, colormap=:RdBu_5)
+    fig
+end
+
+begin # Visualize layer vertical motion and verify interpolation
+    clims = (-0.5, 0.5)
+    fig = Figure(resolution=(1000, 300))
+    ax = Axis(fig[1, 1], title="Sampled points and interpolated dl_dx")
+    h = heatmap!(ax, xs, zs, (@. dl_dx(xs, zs')), colorrange=clims, colormap=:RdBu_5)
+    Colorbar(fig[1, 2], h, label="Layer Slope [m/m]")
+    scatter!(deformation_debug["deformation_xs"], deformation_debug["deformation_zs"],
+             color=deformation_debug["deformation_layer_slope"], colorrange=clims, colormap=:RdBu_5)
+    fig
+end
+
+begin # Visualize layer vertical motion and verify interpolation
+    clims = (-0.008, 0.008)
+    fig = Figure(resolution=(1000, 300))
+    ax = Axis(fig[1, 1], title="Interpolated d2l_dtdz")
+    h = heatmap!(ax, xs, zs, (@. d2l_dtdz(xs, zs')), colorrange=clims, colormap=:RdBu_5)
+    Colorbar(fig[1, 2], h, label="")
+    #scatter!(deformation_debug["deformation_xs"], deformation_debug["deformation_zs"], color=deformation_debug["deformation_delta_l"], colorrange=clims, colormap=:RdBu_5)
+    fig
+end
+
+begin # Visualize layer vertical motion and verify interpolation
+    clims = (-0.002, 0.002)
+    fig = Figure(resolution=(1000, 300))
+    ax = Axis(fig[1, 1], title="Interpolated d2l_dxdz")
+    h = heatmap!(ax, xs, zs, (@. d2l_dxdz(xs, zs')), colorrange=clims, colormap=:RdBu_5)
+    Colorbar(fig[1, 2], h, label="")
+    #scatter!(deformation_debug["deformation_xs"], deformation_debug["deformation_zs"], color=deformation_debug["deformation_delta_l"], colorrange=clims, colormap=:RdBu_5)
+    fig
+end
+
+begin # Plot dl_dt and d2l_dtdz for a single x value
+    fig = Figure(resolution=(1000, 300))
+    x = 5000
+    ax = Axis(fig[1, 1], title="dl_dt and d2l_dtdz for x = $x m")
+    ax2 = Axis(fig[1,1])
+    lines!(ax, zs, (@. dl_dt(x, zs)), label="dl_dt")
+    ax.ylabel = "dl_dt"
+    ax.xlabel = "z [m]"
+
+    #x_idx = argmin( abs.(deformation_debug["deformation_xs"] - x))
+    mask = deformation_debug["deformation_xs"] .== x
+
+    plot!(ax, deformation_debug["deformation_zs"][mask], deformation_debug["deformation_delta_l"][mask],
+        color=:blue)
+
+    lines!(ax2, zs, (@. d2l_dtdz(x, zs)), label="d2l_dtdz", color=:red)
+
+    ax2.yaxisposition = :right
+    ax2.yticklabelalign = (:left, :center)
+    ax2.xticklabelsvisible = false
+    ax2.xticklabelsvisible = false
+    ax2.xlabelvisible = false
+    ax2.ylabel = "d2l_dtdz"
+    ax2.ytickcolor = ax2.yticklabelcolor = ax2.ylabelcolor = :red
+    ax2.ygridcolor = RGBA(Colors.color_names["red"]..., 0.5)
+    ax2.ygridstyle = :dash
+
+    linkxaxes!(ax,ax2)
+
+    fig
+end
+
+begin # Plot dl_dx and d2l_dxdz for a single x value
+    fig = Figure(resolution=(1000, 300))
+    x = 4800
+    ax = Axis(fig[1, 1], title="dl_dx and d2l_dxdz for x = $x m")
+    ax2 = Axis(fig[1,1])
+    lines!(ax, zs, (@. dl_dx(x, zs)), label="dl_dx")
+    ax.ylabel = "dl_dx"
+    ax.xlabel = "z [m]"
+
+    #x_idx = argmin( abs.(deformation_debug["deformation_xs"] - x))
+    mask = deformation_debug["deformation_xs"] .== x
+
+    plot!(ax, deformation_debug["deformation_zs"][mask], deformation_debug["deformation_layer_slope"][mask],
+        color=:blue)
+
+    lines!(ax2, zs, (@. d2l_dxdz(x, zs)), label="d2l_dxdz", color=:red)
+
+    ax2.yaxisposition = :right
+    ax2.yticklabelalign = (:left, :center)
+    ax2.xticklabelsvisible = false
+    ax2.xticklabelsvisible = false
+    ax2.xlabelvisible = false
+    ax2.ylabel = "d2l_dxdz"
+    ax2.ytickcolor = ax2.yticklabelcolor = ax2.ylabelcolor = :red
+    ax2.ygridcolor = RGBA(Colors.color_names["red"]..., 0.5)
+    ax2.ygridstyle = :dash
+
+    linkxaxes!(ax,ax2)
+
+    fig
+end
+
+1+1
 
 # # Zoomed in visualization of just the top part. Useful to check boundary of interpolation
 # begin
@@ -196,8 +296,64 @@ inflow_velocity(z) = u(0, z)
 #xs_u, zs_u, u_est = horizontal_velocity_curvilinear((x, z), surface_velocity, inflow_velocity, surface, dsdx, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg; u_true=u);
 #fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u)
 
-#sol = horizontal_velocity_curvilinear((x, z), surface_velocity, inflow_velocity, surface, dsdx, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg; interpolate_to_xz=false, u_true=u);
+dp, dq = 500.0, 100.0/1200.0
+sol = horizontal_velocity_curvilinear((x, z), surface_velocity, inflow_velocity, surface, dsdx, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg;
+    interpolate_to_xz=false, u_true=u, dp = dp, dq = dq);
 #fig = plot_horizontal_velocity_result(sol[sol.ivs[1]], sol[sol.ivs[2]], sol[sol.dvs[1]], layers_t0, u)
+fig = plot_horizontal_velocity_result(sol[sol.ivs[1]], surface(0)*sol[sol.ivs[2]], sol[sol.dvs[1]], layers_t0, u)
+
+begin
+    p, q = sol.ivs
+    X = ones(length(sol[q]))' .* sol[p]
+    Q = sol[q]' .* ones(length(sol[p]))
+    Z = Q .* (@. surface(X))
+
+    output_dx, output_dz = 200.0, 50.0
+
+    x_out = 0:output_dx:domain_x
+    z_out = 0:output_dz:maximum(Z)
+    X_out = ones(length(z_out))' .* x_out
+    Z_out = z_out' .* ones(length(x_out))
+
+    X_vec = vec(X)
+    Z_vec = vec(Z)
+    Q_vec = vec(Q)
+
+    mask = .!( ((X_vec .== 0) .| (X_vec .== domain_x)) .& ((Q_vec .== 0) .| (Q_vec .== 1.0)) )
+
+    u_est_grid = scipy_interpolate.griddata((X_vec[mask], Z_vec[mask]),
+                    vec(sol[sol.dvs[1]])[mask],
+                    (X_out, Z_out),
+                    method="linear")
+
+    xs_u, zs_u, u_est = x_out, z_out, u_est_grid
+end
+
+begin # Plot results from curvilinear grid along with top boundary condition
+    X = ones(length(sol[sol.ivs[2]]))' .* sol[sol.ivs[1]]
+    Q = sol[sol.ivs[2]]' .* ones(length(sol[sol.ivs[1]]))
+    Z = Q .* (@. surface(X))
+    clims = (0, 25)
+    fig = Figure(resolution=(1000, 500))
+    ax = Axis(fig[1, 1], title="Curvilinear Grid PDE Output (dp = $dp, dq = $dq)")
+    #h = heatmap!(ax, xs, zs, (@. dl_dx(xs, zs')), colorrange=clims, colormap=:RdBu_5)
+    #Colorbar(fig[1, 2], h, label="Layer Slope [m/m]")
+    h = heatmap!(ax, xs_u, zs_u, u_est, colorrange=clims)
+    sc = scatter!(ax, vec(X), vec(Z), color=vec(sol[sol.dvs[1]]), colorrange=clims)
+
+    # Top boundary condition -- offset up by 100m for clarity
+    scatter!(ax, sol[sol.ivs[1]], (@. surface(sol[sol.ivs[1]])) .+ 100, color=(@. surface_velocity(sol[sol.ivs[1]])) .* seconds_per_year,
+            colorrange=clims, marker=:x)
+
+    Colorbar(fig[1, 2], sc, label="Horizontal Velocity [m/yr]")
+
+    Z_diff = (Z[:, 1:end-1] .+ Z[:, 2:end] ) ./ 2
+    X_diff = X[:, 1:end-1]
+
+    scatter!(ax, vec(X_diff), vec(Z_diff), color=vec(diff(sol[sol.dvs[1]], dims=2)), colorrange=(-0.5, 0.5), colormap=:RdBu_5, markersize=5, marker=:rect)
+
+    fig
+end
 
 fig
 
@@ -216,7 +372,8 @@ dist_to_surf = (@. surface(xs_u)) .- zs_u'
 diff_tmp = diff(dist_to_surf, dims=2)
 dist_to_surf_fd = dist_to_surf[:, 1:end-1] .+ (diff_tmp ./ 2)
 
-valid_regions_mask = ((xs_u .> 500.0) .& (xs_u .< (domain_x - 500))) .* ((zs_u[1:end-1] .> 200) .& (zs_u[1:end-1] .< (domain_z-100)))'
+#valid_regions_mask = ((xs_u .> 2000.0) .& (xs_u .< (domain_x - 3000))) .* ((zs_u[1:end-1] .> 400) .& (zs_u[1:end-1] .< (domain_z-400)))'
+valid_regions_mask = ((xs_u .> 1000.0) .& (xs_u .< (domain_x - 1000))) .* ((zs_u[1:end-1] .> 200) .& (zs_u[1:end-1] .< (domain_z-200)))'
 
 rheology_eff_stress = (ρ * g * dist_to_surf_fd .* -(@. dsdx(xs_u)))
 rheology_log_eff_stress = log.( rheology_eff_stress[valid_regions_mask] )
@@ -226,6 +383,7 @@ begin
     fig = Figure(resolution=(1000, 1000))
     ax = Axis(fig[1, 1], title="Effective stress vs strain rate")
     scatter!(ax, rheology_log_eff_stress, rheology_log_eff_strain)
+    lines!(ax, 9:0.1:12, 3 .* (9:0.1:12) .- 39.1, linestyle=:dash, color=:black)
     #xlims!(-15, -5)
     fig
 end
@@ -236,9 +394,9 @@ masked_dudz_fd_true = copy(dudz_fd_true)
 masked_dudz_fd_true[.! valid_regions_mask] .= 0.0
 
 to_plot = OrderedDict(
-        ("dudz_fd (estimated)", "dudz") => masked_dudz_fd,
-        ("dudz_fd (true)", "dudz") => masked_dudz_fd_true,
-        ("difference", "") => masked_dudz_fd - masked_dudz_fd_true
+        ("dudz_fd (estimated)", "dudz") => (masked_dudz_fd, Dict(:colorrange => (-0.03, 0.03), :colormap => :RdBu_5)),
+        ("dudz_fd (true)", "dudz") => (masked_dudz_fd_true, Dict(:colorrange => (-0.03, 0.03), :colormap => :RdBu_5)),
+        ("difference", "") => (masked_dudz_fd - masked_dudz_fd_true, Dict(:colorrange => (-0.005, 0.005), :colormap => :RdBu_5))
 )
 
 fig = plot_fields(xs_u, zs_u[1:end-1], to_plot)
