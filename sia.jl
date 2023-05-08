@@ -67,11 +67,15 @@ function sia_model(spatial_parameters::Tuple{Num, Num}, surface::Function, dsdx:
 
     x, z = spatial_parameters
 
-    A = A0 * exp(-Q/(R * T_rel_p))
+    A, n = A0 * exp(-Q/(R * T_rel_p)), 3.0
 
     # Solve for u (horizontal velocity)
 
-    u(x, z) = -2.0 * A * dsdx(x)^3.0 * 0.25 * ρ^3.0 * g^3.0 * (surface(x)^4.0 - (z - surface(x))^4.0)
+    #u(x, z) = -2.0 * A * dsdx(x)^3.0 * 0.25 * ρ^3.0 * g^3.0 * (surface(x)^4.0 - (z - surface(x))^4.0)
+    A, n = 10^(-30.48), 4.0
+    u(x, z) = -2.0 * A * abs(dsdx(x))^(n-1.0) * dsdx(x) * ρ^n * g^n * (surface(x)^(n+1.0) - (surface(x) - z)^(n+1.0)) / (n + 1.0)
+
+    println("n = $n, \tA = $A")
 
     # Recover w (vertical velocity) through incompressibility
 

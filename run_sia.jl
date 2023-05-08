@@ -66,10 +66,10 @@ fig = plot_fields(xs, zs, to_plot)
 w_reg(x, z) = w(x, z)
 @register w_reg(x, z)
 
-# Approach 2: Create interpolation of w (probably saves compute time)
-w_scipy = scipy_interpolate.RectBivariateSpline(xs, zs, (@. w(xs, zs')), bbox=(0, domain_x, 0, domain_z))
-w_scipy_fn(x, z) = w_scipy(x, z)[1]
-@register w_scipy_fn(x, z)
+# # Approach 2: Create interpolation of w (probably saves compute time)
+# w_scipy = scipy_interpolate.RectBivariateSpline(xs, zs, (@. w(xs, zs')), bbox=(0, domain_x, 0, domain_z))
+# w_scipy_fn(x, z) = w_scipy(x, z)[1]
+# @register w_scipy_fn(x, z)
 
 fig
 
@@ -172,7 +172,7 @@ end
 
 begin # Plot dl_dt and d2l_dtdz for a single x value
     fig = Figure(resolution=(1000, 300))
-    x = 5000
+    x_pos = 5000
     ax = Axis(fig[1, 1], title="dl_dt and d2l_dtdz for x = $x m")
     ax2 = Axis(fig[1,1])
     lines!(ax, zs, (@. dl_dt(x, zs)), label="dl_dt")
@@ -180,12 +180,12 @@ begin # Plot dl_dt and d2l_dtdz for a single x value
     ax.xlabel = "z [m]"
 
     #x_idx = argmin( abs.(deformation_debug["deformation_xs"] - x))
-    mask = deformation_debug["deformation_xs"] .== x
+    mask = deformation_debug["deformation_xs"] .== x_pos
 
     plot!(ax, deformation_debug["deformation_zs"][mask], deformation_debug["deformation_delta_l"][mask],
         color=:blue)
 
-    lines!(ax2, zs, (@. d2l_dtdz(x, zs)), label="d2l_dtdz", color=:red)
+    lines!(ax2, zs, (@. d2l_dtdz(x_pos, zs)), label="d2l_dtdz", color=:red)
 
     ax2.yaxisposition = :right
     ax2.yticklabelalign = (:left, :center)
@@ -204,20 +204,19 @@ end
 
 begin # Plot dl_dx and d2l_dxdz for a single x value
     fig = Figure(resolution=(1000, 300))
-    x = 4800
+    x_pos = 4800
     ax = Axis(fig[1, 1], title="dl_dx and d2l_dxdz for x = $x m")
     ax2 = Axis(fig[1,1])
-    lines!(ax, zs, (@. dl_dx(x, zs)), label="dl_dx")
+    lines!(ax, zs, (@. dl_dx(x_pos, zs)), label="dl_dx")
     ax.ylabel = "dl_dx"
     ax.xlabel = "z [m]"
 
-    #x_idx = argmin( abs.(deformation_debug["deformation_xs"] - x))
-    mask = deformation_debug["deformation_xs"] .== x
+    mask = deformation_debug["deformation_xs"] .== x_pos
 
     plot!(ax, deformation_debug["deformation_zs"][mask], deformation_debug["deformation_layer_slope"][mask],
         color=:blue)
 
-    lines!(ax2, zs, (@. d2l_dxdz(x, zs)), label="d2l_dxdz", color=:red)
+    lines!(ax2, zs, (@. d2l_dxdz(x_pos, zs)), label="d2l_dxdz", color=:red)
 
     ax2.yaxisposition = :right
     ax2.yticklabelalign = (:left, :center)
@@ -362,10 +361,10 @@ fig
 #  =============================
 
 # Find the finite difference derivatives of u_est with respect to z
-u_true = @. u(xs_u, zs_u') * seconds_per_year
+u_true = @. u(xs_u, zs_u')# * seconds_per_year
 dudz_fd_true = diff(u_true, dims=2) ./ diff(zs_u)'
-dudz_fd = diff(u_est, dims=2) ./ diff(zs_u)'
-ρ = 917 # kg/m^3
+dudz_fd = diff(u_est ./ seconds_per_year, dims=2) ./ diff(zs_u)'
+ρ = 918 # kg/m^3
 g = 9.81 # m/s^2
 
 dist_to_surf = (@. surface(xs_u)) .- zs_u'
@@ -375,15 +374,34 @@ dist_to_surf_fd = dist_to_surf[:, 1:end-1] .+ (diff_tmp ./ 2)
 #valid_regions_mask = ((xs_u .> 2000.0) .& (xs_u .< (domain_x - 3000))) .* ((zs_u[1:end-1] .> 400) .& (zs_u[1:end-1] .< (domain_z-400)))'
 valid_regions_mask = ((xs_u .> 1000.0) .& (xs_u .< (domain_x - 1000))) .* ((zs_u[1:end-1] .> 200) .& (zs_u[1:end-1] .< (domain_z-200)))'
 
-rheology_eff_stress = (ρ * g * dist_to_surf_fd .* -(@. dsdx(xs_u)))
-rheology_log_eff_stress = log.( rheology_eff_stress[valid_regions_mask] )
-rheology_log_eff_strain = log.( max.((dudz_fd[valid_regions_mask]), 1e-12) )
+rheology_eff_stress = (ρ * g * dist_to_surf_fd .* -(@. dsdx(xs_u))) # (3.88)
+rheology_log_eff_stress = log10.( rheology_eff_stress[valid_regions_mask] )
+rheology_log_eff_strain = log10.( max.((dudz_fd[valid_regions_mask]), 1e-22) )
+#rheology_log_eff_strain = log10.( (dudz_fd_true[valid_regions_mask]) )
+
+# test -- stress
+A = 1.658286764403978e-25
+x_pos, z_pos = 5000, 900
+eff_stress = -(dsdx(x_pos) * ρ * g * (surface(x_pos) - z_pos))
+x_idx, z_idx = argmin(abs.(xs_u .- x_pos)), argmin(abs.(zs_u .- z_pos))
+rheology_eff_stress[x_idx, z_idx]
+(rheology_eff_stress[x_idx, z_idx]) / eff_stress
+
+# test - strain rate
+dudz_test = 2 * A * eff_stress^3
+dudz_fd_true[x_idx, z_idx]
+dudz_fd_true[x_idx, z_idx] / dudz_test
+
+# test
+err = ((2 * A * rheology_eff_stress .^ 3) ./ dudz_fd_true)
 
 begin
     fig = Figure(resolution=(1000, 1000))
     ax = Axis(fig[1, 1], title="Effective stress vs strain rate")
     scatter!(ax, rheology_log_eff_stress, rheology_log_eff_strain)
-    lines!(ax, 9:0.1:12, 3 .* (9:0.1:12) .- 39.1, linestyle=:dash, color=:black)
+    stress_xs = 0:0.1:5.5
+    #lines!(ax, stress_xs, 3 .* stress_xs .- 39.1, linestyle=:dash, color=:black)
+    lines!(ax, stress_xs, 3 .* stress_xs .+ log10(2*A), linestyle=:dash, color=:black)
     #xlims!(-15, -5)
     fig
 end
@@ -400,3 +418,16 @@ to_plot = OrderedDict(
 )
 
 fig = plot_fields(xs_u, zs_u[1:end-1], to_plot)
+
+to_plot = OrderedDict(
+    ("err", "err") => err
+)
+
+fig = plot_fields(xs_u, zs_u[1:end-1], to_plot)
+
+
+# log10(dudz) = log10(2A) + n * log10(eff_stress)
+A = 1.658286764403978e-25
+log_ref_stress = 6.0
+log_ref_strain_rate = log10.(2A) .+ 3 * log_ref_stress
+log_ref_strain_rate - 4 * log_ref_stress
