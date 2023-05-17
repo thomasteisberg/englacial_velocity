@@ -50,9 +50,9 @@ end
 
 # ## Constants and temperature-dependent flow prefactor
 
-function sia_model(spatial_parameters::Tuple{Num, Num}, surface::Function, dsdx::Function,
-    ρ::Float64 = 918.0, g::Float64 = 9.8, A0::Float64 = 3.985e-13,
-    Q::Float64 = 60.0e3, R::Float64 = 8.314, T_rel_p::Float64 = (273.15-20))
+function sia_model(spatial_parameters::Tuple{Num, Num}, surface::Function, dsdx::Function;
+    ρ::Float64 = 918.0, g::Float64 = 9.8, A0::Float64 = 3.985e-13, n_A0::Float64 = 3.0,
+    Q::Float64 = 60.0e3, R::Float64 = 8.314, T_rel_p::Float64 = (273.15-20), n::Float64 = 3.0)
 
     # Implementation is based on Section 3.4 of Ralf Greve's course notes:
     # https://ocw.hokudai.ac.jp/wp-content/uploads/2016/02/DynamicsOfIce-2005-Note-all.pdf
@@ -67,15 +67,22 @@ function sia_model(spatial_parameters::Tuple{Num, Num}, surface::Function, dsdx:
 
     x, z = spatial_parameters
 
-    A, n = A0 * exp(-Q/(R * T_rel_p)), 3.0
+    # Baseline case A value (i.e. the exponent for which )
+    A = A0 * exp(-Q/(R * T_rel_p))
+
+    if n != n_A0
+        println("Re-calculating A for requested exponent n = $n")
+        log_ref_stress = 6.0
+        log_ref_strain_rate = log10.(2A) .+ n_A0 * log_ref_stress
+        log_2A = log_ref_strain_rate - n * log_ref_stress # log10(2A)
+        A = 10^(log_2A) / 2
+    end
+
+    println("n = $n, \tA = $A")
 
     # Solve for u (horizontal velocity)
 
-    #u(x, z) = -2.0 * A * dsdx(x)^3.0 * 0.25 * ρ^3.0 * g^3.0 * (surface(x)^4.0 - (z - surface(x))^4.0)
-    A, n = 10^(-30.48), 4.0
     u(x, z) = -2.0 * A * abs(dsdx(x))^(n-1.0) * dsdx(x) * ρ^n * g^n * (surface(x)^(n+1.0) - (surface(x) - z)^(n+1.0)) / (n + 1.0)
-
-    println("n = $n, \tA = $A")
 
     # Recover w (vertical velocity) through incompressibility
 

@@ -14,7 +14,6 @@ includet("sia.jl")
 includet("age_depth.jl")
 includet("horizontal_velocity.jl")
 includet("plot_helpers.jl")
-includet("horizontal_velocity_pinn.jl")
 
 seconds_per_year = 60 * 60 * 24 * 365.0 # m/s to m/yr conversion
 
@@ -62,7 +61,7 @@ fig
 ## Generate 2D (x, z) velocity field from SIA model
 #  ================================================
 
-u, w, dudx = sia_model((x, z), surface, dsdx; n=3.0)
+u, w, dudx = sia_model((x, z), surface, dsdx; n=2.0)
 
 to_plot = OrderedDict(
         ("u (Horizontal Velocity)", "u [m/a]") => (@. u(xs, zs')) * seconds_per_year,
@@ -85,7 +84,8 @@ fig
 ## Alternative layers based on particle flow
 #  ===
 
-layer_ages = 0:100:5000
+#layer_ages = 0:100:5000
+layer_ages = 10 .^ (range(0,stop=3,length=50))
 layers_t0 = advect_layer(u, w, xs, surface, layer_ages*seconds_per_year)
 
 begin
@@ -95,6 +95,7 @@ begin
         lines!(ax, xs, l(xs))
     end
     ylims!(0,domain_z)
+    fig
 end
 
 save_figure(fig, "layers")
@@ -252,45 +253,124 @@ fig = plot_fields(xs, zs, to_plot)
 save_figure(fig, "inputs")
 fig
 
+#  =========================
+## Method Of Characteristics
+#  =========================
+
+function dv_ds(v, p, s)
+    return -1 * d2l_dxdz(s, layers_t0[p](s)[1])*v - d2l_dtdz(s, layers_t0[p](s)[1])
+end
+prob = ODEProblem(dv_ds, 0, (0.0, domain_x), 1)
+
+layer_sols = Vector{ODESolution}(undef, length(layers_t0))
+
+for p in 1:length(layers_t0)
+    z0 = layers_t0[p](0)[1]
+    v0 = u(10, z0) # TODO offset?
+    prob = remake(prob, p=p, u0=v0)
+    layer_sols[p] = solve(prob)
+    println(layer_sols[p].retcode)
+end
+
+begin
+    fig = Figure(resolution=(1000, 600))
+
+    # Solution
+    ax = Axis(fig[1, 1], title="Solutions (points) overlaid on true values (basemap)")
+    crange = (0, 23)
+
+    h = heatmap!(ax, xs, zs, (@. u(xs, zs')) .* seconds_per_year, colorrange=crange)
+    cb = Colorbar(fig[1,2], h, label="u [m/yr]")
+
+    for p in 1:length(layers_t0)
+        plot!(ax, layer_sols[p].t, layers_t0[p](layer_sols[p].t), color=layer_sols[p].u, colorrange=crange)
+    end
+
+    # Error
+    ax = Axis(fig[2, 1], title="Error (predicted - true)")
+    crange = (-1, 1)
+    sc = nothing
+
+    for p in 1:length(layers_t0)
+        xs_l = layer_sols[p].t
+        zs_l = layers_t0[p](layer_sols[p].t)
+        u_true = (@. u(xs_l, zs_l)) .* seconds_per_year
+        sc = plot!(ax, xs_l, zs_l, color=layer_sols[p].u .- u_true, colorrange=crange, colormap=:RdBu_5)
+    end
+    cb = Colorbar(fig[2,2], sc, label="Error [m/yr]")
+
+    fig
+end
+
+xs_u, zs_u = xs, zs
+
+xs_l = collect(Iterators.flatten(layer_sols[p].t for p in 1:length(layers_t0)))
+zs_l = collect(Iterators.flatten(layers_t0[p](layer_sols[p].t) for p in 1:length(layers_t0)))
+u_l = collect(Iterators.flatten(layer_sols[p].u for p in 1:length(layers_t0)))
+
+X = xs_u .* ones(length(zs_u), 1)'
+Z = ones(length(xs_u), 1) .* zs_u'
+
+u_est = scipy_interpolate.griddata((xs_l, zs_l), u_l, (X, Z), method="cubic", fill_value=NaN)
+
+fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u)
+save_figure(fig, "pderesult")
+fig
+
+#  ==============================
+## Direct method of finding du/dz
+#  ==============================
+
+dudz_direct = ((-1 * (@. d2l_dxdz(xs_u, zs_u')) .* u_est) .- (@. d2l_dtdz(xs_u, zs_u'))) .* ((@. dl_dx(xs_u, zs_u')) .^ -1)
+
+
+to_plot = OrderedDict(
+        ("dudz_direct (estimated)", "dudz") => (dudz_direct, Dict(:colorrange => (-0.06, 0.06), :colormap => :RdBu_5)),
+)
+
+fig = plot_fields(xs_u, zs_u, to_plot)
+
+1
+
 #  =============================
 ## Solve for horizontal velocity
 #  =============================
 
-d2l_dtdz_reg(x, z) = d2l_dtdz(x, z)
-@register d2l_dtdz_reg(x, z)
-d2l_dxdz_reg(x, z) = d2l_dxdz(x, z)
-@register d2l_dxdz_reg(x, z)
-dl_dx_reg(x, z) = dl_dx(x, z)
-@register dl_dx_reg(x, z)
+# d2l_dtdz_reg(x, z) = d2l_dtdz(x, z)
+# @register d2l_dtdz_reg(x, z)
+# d2l_dxdz_reg(x, z) = d2l_dxdz(x, z)
+# @register d2l_dxdz_reg(x, z)
+# dl_dx_reg(x, z) = dl_dx(x, z)
+# @register dl_dx_reg(x, z)
 
-# Used in the loss function for the PINN version,
-# so we have to explicitly identify as non-differentiable
-@non_differentiable d2l_dtdz_reg(::Any, ::Any)
-@non_differentiable d2l_dxdz_reg(::Any, ::Any)
-@non_differentiable dl_dx_reg(::Any, ::Any)
+# # Used in the loss function for the PINN version,
+# # so we have to explicitly identify as non-differentiable
+# @non_differentiable d2l_dtdz_reg(::Any, ::Any)
+# @non_differentiable d2l_dxdz_reg(::Any, ::Any)
+# @non_differentiable dl_dx_reg(::Any, ::Any)
 
-xs_u, zs_u, u_est = horizontal_velocity((x, z), u, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg);
-fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u)
+# xs_u, zs_u, u_est = horizontal_velocity((x, z), u, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg);
+# fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u)
 
-xs_u, zs_u, u_est, res_tmp, phi_tmp = horizontal_velocity_pinn((x, z), u, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg)
-fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u)
+# xs_u, zs_u, u_est, res_tmp, phi_tmp = horizontal_velocity_pinn((x, z), u, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg)
+# fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u)
 
-# surface_velocity(x) = u(x, surface(x))
-# @register surface_velocity(x)
-# inflow_velocity(z) = u(0, z)
-# @register inflow_velocity(z)
+# # surface_velocity(x) = u(x, surface(x))
+# # @register surface_velocity(x)
+# # inflow_velocity(z) = u(0, z)
+# # @register inflow_velocity(z)
 
-# #xs_u, zs_u, u_est = horizontal_velocity_curvilinear((x, z), surface_velocity, inflow_velocity, surface, dsdx, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg; u_true=u);
-# #fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u)
+# # #xs_u, zs_u, u_est = horizontal_velocity_curvilinear((x, z), surface_velocity, inflow_velocity, surface, dsdx, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg; u_true=u);
+# # #fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u)
 
-# dp, dq = 500.0, 100.0/1200.0
-# sol = horizontal_velocity_curvilinear((x, z), surface_velocity, inflow_velocity, surface, dsdx, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg;
-#     interpolate_to_xz=false, u_true=u, dp = dp, dq = dq);
-# #fig = plot_horizontal_velocity_result(sol[sol.ivs[1]], sol[sol.ivs[2]], sol[sol.dvs[1]], layers_t0, u)
-# fig = plot_horizontal_velocity_result(sol[sol.ivs[1]], surface(0)*sol[sol.ivs[2]], sol[sol.dvs[1]], layers_t0, u)
+# # dp, dq = 500.0, 100.0/1200.0
+# # sol = horizontal_velocity_curvilinear((x, z), surface_velocity, inflow_velocity, surface, dsdx, d2l_dtdz_reg, d2l_dxdz_reg, dl_dx_reg;
+# #     interpolate_to_xz=false, u_true=u, dp = dp, dq = dq);
+# # #fig = plot_horizontal_velocity_result(sol[sol.ivs[1]], sol[sol.ivs[2]], sol[sol.dvs[1]], layers_t0, u)
+# # fig = plot_horizontal_velocity_result(sol[sol.ivs[1]], surface(0)*sol[sol.ivs[2]], sol[sol.dvs[1]], layers_t0, u)
 
-save_figure(fig, "pderesult")
-fig
+# save_figure(fig, "pderesult")
+# fig
 
 ## Visualize du/dz
 
@@ -367,10 +447,17 @@ dist_to_surf_fd = dist_to_surf[:, 1:end-1] .+ (diff_tmp ./ 2)
 
 #valid_regions_mask = ((xs_u .> 2000.0) .& (xs_u .< (domain_x - 3000))) .* ((zs_u[1:end-1] .> 400) .& (zs_u[1:end-1] .< (domain_z-400)))'
 valid_regions_mask = ((xs_u .> 1000.0) .& (xs_u .< (domain_x - 1000))) .* ((zs_u[1:end-1] .> 200) .& (zs_u[1:end-1] .< (domain_z-200)))'
+valid_regions_mask .&= .! isnan.(dudz_fd) # Filter out NaN values
+valid_regions_mask .&= (dudz_fd .> 0.0) # Filter out negative values (TODO: slightly sus)
+
+if minimum(dudz_fd[.! isnan.(dudz_fd)]) < -1e-10
+    println("WARNING: dudz_fd has large negative values. This should not happen.")
+    println("         Minimum value: ", minimum(dudz_fd[.! isnan.(dudz_fd)]))
+end
 
 rheology_eff_stress = (ρ * g * dist_to_surf_fd .* -(@. dsdx(xs_u))) # (3.88)
 rheology_log_eff_stress = log10.( rheology_eff_stress[valid_regions_mask] )
-rheology_log_eff_strain = log10.( max.((dudz_fd[valid_regions_mask]), 1e-22) )
+rheology_log_eff_strain = log10.( (dudz_fd[valid_regions_mask]) )
 #rheology_log_eff_strain = log10.( (dudz_fd_true[valid_regions_mask]) )
 
 begin
@@ -381,7 +468,8 @@ begin
     #lines!(ax, stress_xs, 3 .* stress_xs .- 39.1, linestyle=:dash, color=:black)
     A = 1.658286764403978e-25
     lines!(ax, stress_xs, 3 .* stress_xs .+ log10(2*A), linestyle=:dash, color=:black)
-    #xlims!(-15, -5)
+    xlims!(3, 6)
+    ylims!(-15,-5)
     fig
 end
 
@@ -391,13 +479,13 @@ fig
 ## dudz in valid region 
 
 masked_dudz_fd = copy(dudz_fd) * seconds_per_year
-masked_dudz_fd[.! valid_regions_mask] .= 0.0
+masked_dudz_fd[.! valid_regions_mask] .= NaN
 masked_dudz_fd_true = copy(dudz_fd_true) * seconds_per_year
-masked_dudz_fd_true[.! valid_regions_mask] .= 0.0
+masked_dudz_fd_true[.! valid_regions_mask] .= NaN
 
 to_plot = OrderedDict(
-        ("dudz_fd (estimated)", "dudz") => (masked_dudz_fd, Dict(:colorrange => (-0.03, 0.03), :colormap => :RdBu_5)),
-        ("dudz_fd (true)", "dudz") => (masked_dudz_fd_true, Dict(:colorrange => (-0.03, 0.03), :colormap => :RdBu_5)),
+        ("dudz_fd (estimated)", "dudz") => (masked_dudz_fd, Dict(:colorrange => (-0.06, 0.06), :colormap => :RdBu_5)),
+        ("dudz_fd (true)", "dudz") => (masked_dudz_fd_true, Dict(:colorrange => (-0.06, 0.06), :colormap => :RdBu_5)),
         ("difference", "") => (masked_dudz_fd - masked_dudz_fd_true, Dict(:colorrange => (-0.005, 0.005), :colormap => :RdBu_5))
 )
 
