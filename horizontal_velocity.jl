@@ -75,11 +75,24 @@ function advect_layer(u, w, xs, initial_layer, layer_ages)
     return layers
 end
 
-function estimate_layer_deformation(u::Function, w::Function, xs, layers_t0)
+function add_measurement_noise_to_layer(layer, noise_std, xs)
+    z_layer = layer(xs) .+ (randn(length(xs)) .* noise_std)
+    return scipy_interpolate.interp1d(xs, z_layer, kind="linear", fill_value="extrapolate")
+end
+
+
+function estimate_layer_deformation(u::Function, w::Function, xs, layers_t0; noise_std=0.0)
     layers_t1 = Vector{Union{Function, PyObject}}(undef, length(layers_t0))
+
+    layers_t0 = deepcopy(layers_t0)
 
     for i in 1:length(layer_ages)
         layers_t1[i] = advect_layer(u, w, xs, layers_t0[i], 1.0*seconds_per_year)[1]
+
+        if noise_std > 0.0
+            layers_t1[i] = add_measurement_noise_to_layer(layers_t1[i], noise_std, xs)
+            #layers_t0[i] = add_measurement_noise_to_layer(layers_t0[i], noise_std, xs)
+        end
     end
 
     begin
@@ -332,7 +345,7 @@ function plot_horizontal_velocity_result(xs, zs, u_sol, layers, u_true_fn::Funct
 
     # Comparison between the two
     ax = Axis(fig[3, 1], title="solution - true values\n(layers shown as gray lines for reference)")
-    h = heatmap!(ax, xs, zs, u_sol - u_true, colorrange=(-2, 2), colormap=:RdBu_5)
+    h = heatmap!(ax, xs, zs, u_sol - u_true, colorrange=(-10, 10), colormap=:RdBu_5)
     Colorbar(fig[3, 2], h, label="Horizontal Velocity Difference [m/yr]")
     ylims!(ax, minimum(zs), maximum(zs))
 
