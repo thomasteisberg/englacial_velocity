@@ -3,7 +3,7 @@ using Revise
 using CairoMakie
 using Colors
 using Symbolics
-using OrderedCollections
+#using OrderedCollections
 using Dates
 
 ENV["PYTHON"] = ""
@@ -137,113 +137,41 @@ fig
 function layer_dl_dx(x, layer_idx, dx=1.0)
     # Numerical central difference approximation of layer slope
     # Output units are m/m
-    (layers_t0[layer_idx](x + dx)[1] - layers_t0[layer_idx](x - dx)[1]) / (2 * dx)
+    (layers_t0[layer_idx](x .+ dx) .- layers_t0[layer_idx](x .- dx)) / (2 * dx)
 end
 
 function layer_dl_dt(x, layer_idx)
     # Numerical forward difference approximation of layer vertical deformation
     # Output units are m/year
-    layers_t1[layer_idx](x)[1] - layers_t0[layer_idx](x)[1] # dt = 1 year
+    layers_t1[layer_idx](x) .- layers_t0[layer_idx](x) # dt = 1 year
 end
 
 function layer_d2l_dxdz(x, layer_idx)
     # Numerical central difference approximation of d^2l/(dxdz)
     layer_p1 = layer_dl_dx(x, layer_idx+1)
     layer_m1 = layer_dl_dx(x, layer_idx-1)
-    layer_dz = layers_t0[layer_idx+1](x)[1] - layers_t0[layer_idx-1](x)[1]
-    (layer_p1 - layer_m1) / (layer_dz)
+    layer_dz = layers_t0[layer_idx+1](x) .- layers_t0[layer_idx-1](x)
+    (layer_p1 - layer_m1) ./ (layer_dz)
 end
 
 function layer_d2l_dtdz(x, layer_idx)
     # Numerical central difference approximation of d^2l/(dtdz)
     layer_p1 = layer_dl_dt(x, layer_idx+1)
     layer_m1 = layer_dl_dt(x, layer_idx-1)
-    layer_dz = layers_t0[layer_idx+1](x)[1] - layers_t0[layer_idx-1](x)[1]
-    (layer_p1 - layer_m1) / (layer_dz)
+    layer_dz = layers_t0[layer_idx+1](x) .- layers_t0[layer_idx-1](x)
+    (layer_p1 - layer_m1) ./ (layer_dz)
 end
-
-#  ==========================
-## Estimate layer deformation
-#  ==========================
-
-dl_dt, d2l_dtdz, dl_dx, d2l_dxdz, deformation_debug = estimate_layer_deformation(u, w, xs, layers_t0, noise_std=0.0)
-
-begin
-    fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1, 1], title="dl_dx")
-    clims = (-0.05, 0.05)
-    h = heatmap!(ax, xs, zs, ((@. dl_dx(xs, zs'))), colorrange=clims, colormap = :RdBu_5)
-    h = scatter!(ax, deformation_debug["deformation_xs"], deformation_debug["deformation_zs"],
-                color=deformation_debug["deformation_layer_slope"],
-                colorrange=clims, colormap = :RdBu_5,
-                strokewidth=1)
-    Colorbar(fig[1, 2], h, label="dl/dx")
-    fig
-end
-
-## TODO
-begin
-    fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1, 1], title="dl_dx Interpolation Error")
-    clims = (-100, 100)
-    #h = heatmap!(ax, xs, zs, ((@. dl_dx(xs, zs'))), colorrange=clims, colormap = :RdBu_5)
-    h = scatter!(ax, deformation_debug["deformation_xs"], deformation_debug["deformation_zs"],
-                color=100 * (deformation_debug["deformation_layer_slope"] - ((@. dl_dx(deformation_debug["deformation_xs"], deformation_debug["deformation_zs"])))) ./ ((@. dl_dx(deformation_debug["deformation_xs"], deformation_debug["deformation_zs"]))),
-                colorrange=clims, colormap = :RdBu_5,
-                strokewidth=1)
-    Colorbar(fig[1, 2], h, label="dl/dx error %")
-    fig
-end
-##
-begin
-    fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1, 1], title="dl_dt")
-    clims = (-15, 15)
-    h = heatmap!(ax, xs, zs, ((@. dl_dt(xs, zs'))), colorrange=clims, colormap = :RdBu_5)
-    h = scatter!(ax, deformation_debug["deformation_xs"], deformation_debug["deformation_zs"],
-                color=deformation_debug["deformation_delta_l"],
-                colorrange=clims, colormap = :RdBu_5,
-                strokewidth=1)
-    Colorbar(fig[1, 2], h, label="dl/dt")
-    fig
-end
-
-#  ==========================
-## Visualize PDE input fields
-#  ==========================
-
-# Input fields to our PDE:
-# d2l_dtdz ✓
-# d2l_dxdz ✓
-# dl_dx ✓
-# Not directly an input, but useful to see anyway:
-# dl_dt ✓
-
-to_plot = OrderedDict(
-        ("d^2l / dtdz", "d2l_dtdz [m/(yr⋅m)]") => ((@. d2l_dtdz(xs, zs')), Dict(:colorrange => (-0.1, 0.1), :colormap => :RdBu_5)),
-        ("d^2l / dxdz", "d2l_dxdz [m/(m^2)]") => ((@. d2l_dxdz(xs, zs')), Dict(:colorrange => (-0.1e-2, 0.1e-2), :colormap => :RdBu_5)),
-        ("dl / dx", "dl_dx [m/m]") => ((@. dl_dx(xs, zs')), Dict(:colorrange => (-0.5, 0.5), :colormap => :RdBu_5)),
-        ("dl / dt", "dl_dt [m/yr]") => ((@. dl_dt(xs, zs')), Dict(:colorrange => (-10, 10), :colormap => :RdBu_5))
-)
-
-fig = plot_fields(xs, zs, to_plot; surface=surface)
-save_figure(fig, "inputs")
-fig
 
 #  =========================
 ## Method Of Characteristics
 #  =========================
 
 function dv_ds(v, p, s)
-    return -1 * d2l_dxdz(s, layers_t0[p](s)[1])*v - d2l_dtdz(s, layers_t0[p](s)[1])
-end
-
-function dv_ds_layers(v, p, s)
-    return -1 * layer_d2l_dxdz(s, p)*v - layer_d2l_dtdz(s, p)
+    return -1 * layer_d2l_dxdz(s, p)[1]*v - layer_d2l_dtdz(s, p)[1]
 end
 
 start_pos_x = 10
-prob = ODEProblem(dv_ds_layers, 0, (start_pos_x, domain_x), 1, saveat=100, abstol=1e-12)
+prob = ODEProblem(dv_ds, 0, (start_pos_x, domain_x), 1, saveat=100, abstol=1e-12)
 
 layer_sols = Vector{ODESolution}(undef, length(layers_t0))
 
@@ -271,7 +199,7 @@ begin
 
     # Error
     ax = Axis(fig[2, 1], title="Error (predicted - true)")
-    crange = (-10, 10)
+    crange = (-5, 5)
     sc = nothing
 
     for p in 2:length(layers_t0)-1
@@ -298,59 +226,16 @@ begin
     fig
 end
 
-#
-##
-#
-
-xs_u, zs_u = xs, zs
-
-xs_l = collect(Iterators.flatten(layer_sols[p].t for p in 2:length(layers_t0)-1))
-zs_l = collect(Iterators.flatten(layers_t0[p](layer_sols[p].t) for p in 2:length(layers_t0)-1))
-u_l = collect(Iterators.flatten(layer_sols[p].u for p in 2:length(layers_t0)-1))
-stability_l = collect(Iterators.flatten(cumsum((@. d2l_dxdz(layer_sols[p].t, layers_t0[p](layer_sols[p].t))) .< 0) for p in 2:length(layers_t0)-1))
-
-X = xs_u .* ones(length(zs_u), 1)'
-Z = ones(length(xs_u), 1) .* zs_u'
-
-u_est = scipy_interpolate.griddata((xs_l, zs_l), u_l, (X, Z), method="cubic", fill_value=NaN)
-stability_est = scipy_interpolate.griddata((xs_l, zs_l), stability_l, (X, Z), method="cubic", fill_value=NaN)
-
-fig = plot_horizontal_velocity_result(xs_u, zs_u, u_est, layers_t0, u, surface)
-save_figure(fig, "pderesult")
-fig
-
-begin
-    fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1, 1], title="Stability")
-    h = heatmap!(ax, xs_u, zs_u, stability_est)
-    Colorbar(fig[1, 2], h, label="Unstable count")
-    fig
-end
-
-#
-##
-#
-
-begin
-    fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1, 1], title="Stability vs Error")
-    scatter!(ax, collect(Iterators.flatten(stability_est)),
-                 collect(Iterators.flatten(u_est .- (@. u(xs_u, zs_u') .* seconds_per_year))),
-                 markersize=2)
-    fig
-end
-
 #  =============================
 ## Quality of layer estimate based on ODE stability
 #  =============================
 
 # Iterate over each layer and find the percentage of points where d2l_dxdz is negative
-layer_stability = zeros(length(layers_t0))
-for (i, layer) in enumerate(layers_t0)
-    z_layer = layer(xs_u)
-    b_layer = @. d2l_dxdz(xs_u, z_layer)
-    layer_stability[i] = sum(b_layer .> 0.0) / length(b_layer)
-    println("Layer ", i, " stability: ", layer_stability[i])
+layer_stability = NaN * zeros(length(layers_t0))
+for layer_idx = 2:length(layers_t0)-1
+    b_layer = layer_d2l_dxdz(xs, layer_idx)
+    layer_stability[layer_idx] = sum(b_layer .> 0.0) / length(b_layer)
+    println("Layer ", layer_idx, " stability: ", layer_stability[layer_idx])
 end
 
 #  =============================
@@ -418,90 +303,6 @@ end
 save_figure(fig, "rheology_moc")
 fig
 
-
-#  =============================
-## Estimate ice effective viscosity
-#  =============================
-
-# Find the finite difference derivatives of u_est with respect to z
-u_true = @. u(xs_u, zs_u')# * seconds_per_year
-dudz_fd_true = diff(u_true, dims=2) ./ diff(zs_u)'
-dudz_fd = diff(u_est ./ seconds_per_year, dims=2) ./ diff(zs_u)'
-ρ = 918 # kg/m^3
-g = 9.81 # m/s^2
-
-dist_to_surf = (@. surface(xs_u)) .- zs_u'
-diff_tmp = diff(dist_to_surf, dims=2)
-dist_to_surf_fd = dist_to_surf[:, 1:end-1] .+ (diff_tmp ./ 2)
-
-valid_regions_mask = ((xs_u .> x_offset_left) .& (xs_u .< (domain_x - x_offset_right))) .* ((zs_u[1:end-1] .> z_offset_bottom) .& (zs_u[1:end-1] .< (domain_z-z_offset_top)))'
-valid_regions_mask .&= .! isnan.(dudz_fd) # Filter out NaN values
-valid_regions_mask .&= (dudz_fd .> 0.0) # Filter out negative values (TODO: slightly sus)
-
-if minimum(dudz_fd[.! isnan.(dudz_fd)]) < -1e-10
-    println("WARNING: dudz_fd has large negative values. This should not happen.")
-    println("         Minimum value: ", minimum(dudz_fd[.! isnan.(dudz_fd)]))
-end
-
-rheology_eff_stress = (ρ * g * dist_to_surf_fd .* -(@. dsdx(xs_u))) # (3.88)
-rheology_log_eff_stress = log10.( rheology_eff_stress[valid_regions_mask] )
-rheology_log_eff_strain = log10.( (dudz_fd[valid_regions_mask]) )
-#rheology_log_eff_strain = log10.( (dudz_fd_true[valid_regions_mask]) )
-
-X_u = xs_u .* ones(length(zs_u), 1)'
-Z_u = ones(length(xs_u), 1) .* zs_u'
-X_u_valid = X_u[:, 1:end-1][valid_regions_mask]
-Z_u_valid = Z_u[:, 1:end-1][valid_regions_mask]
-
-begin
-    fig = Figure(resolution=(1000, 1000))
-    ax = Axis(fig[1, 1], title="Effective stress vs strain rate")
-    scatter!(ax, rheology_log_eff_stress, rheology_log_eff_strain, markersize=2, color=Z_u_valid)
-    stress_xs = 0:0.1:5.5
-    #lines!(ax, stress_xs, 3 .* stress_xs .- 39.1, linestyle=:dash, color=:black)
-    A_n3 = 1.658286764403978e-25
-    lines!(ax, stress_xs, 3 .* stress_xs .+ log10(2*A_n3), linestyle=:dash, color=:black)
-    A_n4 = 1.658286764403982e-31
-    lines!(ax, stress_xs, 4 .* stress_xs .+ log10(2*A_n4), linestyle=:dash, color=:black)
-    A_n2 = 1.658286764403982e-19
-    lines!(ax, stress_xs, 2 .* stress_xs .+ log10(2*A_n2), linestyle=:dash, color=:black)
-    xlims!(3, 6)
-    ylims!(-15,-5)
-    fig
-end
-
-save_figure(fig, "rheology")
-fig
-
-#  =============================
-## Stress strain at a single x position
-#  =============================
-
-x_pos = 10e3
-x_idx = argmin(abs.(xs_u .- x_pos))
-
-begin
-    fig = Figure(resolution=(1000, 1000))
-    
-    ax = Axis(fig[1, 1], title="u")
-    lines!(ax, seconds_per_year*u_true[x_idx, :], zs_u, color=:black, linestyle=:dash)
-    plot!(ax, u_est[x_idx, :], zs_u, color=:red)
-    ylims!(ax, 0, surface(x_pos))
-
-    ax = Axis(fig[1, 2], title="dudz")
-    lines!(ax, seconds_per_year*dudz_fd_true[x_idx, :], zs_u[1:end-1], color=:black, linestyle=:dash)
-    plot!(ax, seconds_per_year*dudz_fd[x_idx, :], zs_u[1:end-1], color=:red)
-    ylims!(ax, 0, surface(x_pos))
-
-    ax = Axis(fig[1, 3], title="Log effective stress")
-    lines!(ax, log10.(max.(rheology_eff_stress[x_idx, :],1e-12)), zs_u[1:end-1], color=:black, linestyle=:dash)
-    ylims!(ax, 0, surface(x_pos))
-    xlims!(ax, 3, 6)
-
-    fig
-end
-
-
 #  =============================
 ## Stress/strain at a single position from each layer
 #  =============================
@@ -511,16 +312,15 @@ g = 9.81 # m/s^2
 minimum_z_spacing_visc = 10
 
 x_pos = 15e3
-x_idx = argmin(abs.(xs_u .- x_pos))
+x_idx = argmin(abs.(xs .- x_pos))
 
 # Iterate over each layer and find the percentage of points where d2l_dxdz is negative
 layer_stability_to_point = zeros(length(layers_t0))
-for (i, layer) in enumerate(layers_t0)
+for layer_idx = 2:length(layers_t0)-1
     xs_tmp = 0.0:10.0:x_pos
-    z_layer = layer(xs_tmp)
-    b_layer = @. d2l_dxdz(xs_tmp, z_layer)
-    layer_stability_to_point[i] = sum(b_layer .> 0.0) / length(b_layer)
-    println("Layer ", i, " stability % up to ", (x_pos/1e3), " km: ", layer_stability_to_point[i])
+    b_layer = layer_d2l_dxdz(xs_tmp, layer_idx)
+    layer_stability_to_point[layer_idx] = sum(b_layer .> 0.0) / length(b_layer)
+    println("Layer ", layer_idx, " stability % up to ", (x_pos/1e3), " km: ", layer_stability_to_point[layer_idx])
 end
 
 # Find du/dz from the finite differences along the layer_sols lines
@@ -561,13 +361,17 @@ begin
     fig = Figure(resolution=(1000, 1000))
     cmap = cgrad([:red, :red, :black], [0.0, 0.5, 1.0])
     
+    zs_u = 0:10.0:surface(x_pos)
+    u_true = seconds_per_year .* (@. u(x_pos, zs_u))
+    dudz_fd_true = diff(u_true) ./ diff(zs_u)
+
     ax = Axis(fig[1, 1], title="u")
-    lines!(ax, seconds_per_year*u_true[x_idx, :], zs_u, color=:black, linestyle=:dash)
+    lines!(ax, u_true, zs_u, color=:black, linestyle=:dash)
     scatter!(ax, u_visc, z_visc, color=stability, colormap=cmap)
     ylims!(ax, 0, surface(x_pos))
 
     ax = Axis(fig[1, 2], title="dudz")
-    lines!(ax, seconds_per_year*dudz_fd_true[x_idx, :], zs_u[1:end-1], color=:black, linestyle=:dash)
+    lines!(ax, dudz_fd_true, zs_u[1:end-1], color=:black, linestyle=:dash)
     plot!(ax, seconds_per_year*dudz_visc, z_visc, color=stability, colormap=cmap)
     ylims!(ax, 0, surface(x_pos))
 
