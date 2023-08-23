@@ -325,13 +325,16 @@ function horizontal_velocity_curvilinear(spatial_parameters::Tuple{Num, Num},
     end
 end
 
-function plot_horizontal_velocity_result(xs, zs, u_sol, layers, u_true_fn::Function)
+function plot_horizontal_velocity_result(xs, zs, u_sol, layers, u_true_fn::Function, surface::Function)
     # Visualize result and compare with ground truth
 
-    u_true = (@. u_true_fn(xs, zs')) * seconds_per_year # Ground truth on PDE solution grid
-    #clims = (0, max(maximum(u_sol[@. ~isnan.(u_sol)]), maximum(u_true)))
-    clims = (0, maximum(u_true))
-    #clims = (0, 10)
+    u_true = (@. u_true_fn(xs, zs')) * seconds_per_year # Ground truth
+    above_surface = (ones(length(xs), 1) .* zs') .> (@. surface(xs))
+    u_true[above_surface] .= NaN
+
+    clims = (0, maximum(u_true[.~isnan.(u_true)]))
+    clim_err_max = 0.1 * maximum(u_true[.~isnan.(u_true)])
+    clims_error = (-clim_err_max, clim_err_max)
 
     fig = Figure(resolution=(1000, 1000))
     ax = Axis(fig[1, 1], title="PDE solution")
@@ -345,7 +348,7 @@ function plot_horizontal_velocity_result(xs, zs, u_sol, layers, u_true_fn::Funct
 
     # Comparison between the two
     ax = Axis(fig[3, 1], title="solution - true values\n(layers shown as gray lines for reference)")
-    h = heatmap!(ax, xs, zs, u_sol - u_true, colorrange=(-10, 10), colormap=:RdBu_5)
+    h = heatmap!(ax, xs, zs, u_sol - u_true, colorrange=clims_error, colormap=:RdBu_5)
     Colorbar(fig[3, 2], h, label="Horizontal Velocity Difference [m/yr]")
     ylims!(ax, minimum(zs), maximum(zs))
 

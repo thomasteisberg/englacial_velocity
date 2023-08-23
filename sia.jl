@@ -52,7 +52,8 @@ end
 
 function sia_model(spatial_parameters::Tuple{Num, Num}, surface::Function, dsdx::Function;
     ρ::Float64 = 918.0, g::Float64 = 9.8, A0::Float64 = 3.985e-13, n_A0::Float64 = 3.0,
-    Q::Float64 = 60.0e3, R::Float64 = 8.314, T_rel_p::Float64 = (273.15-20), n::Float64 = 3.0)
+    Q::Float64 = 60.0e3, R::Float64 = 8.314, T_rel_p::Float64 = (273.15-20), n::Float64 = 3.0,
+    basal_velocity::Function = (x) -> 0.0)
 
     # Implementation is based on Section 3.4 of Ralf Greve's course notes:
     # https://ocw.hokudai.ac.jp/wp-content/uploads/2016/02/DynamicsOfIce-2005-Note-all.pdf
@@ -82,7 +83,7 @@ function sia_model(spatial_parameters::Tuple{Num, Num}, surface::Function, dsdx:
 
     # Solve for u (horizontal velocity)
 
-    u(x, z) = -2.0 * A * abs(dsdx(x))^(n-1.0) * dsdx(x) * ρ^n * g^n * (surface(x)^(n+1.0) - (surface(x) - z)^(n+1.0)) / (n + 1.0)
+    u(x, z) = (-2.0 * A * abs(dsdx(x))^(n-1.0) * dsdx(x) * ρ^n * g^n * (surface(x)^(n+1.0) - max(surface(x) - z, 0)^(n+1.0)) / (n + 1.0)) + basal_velocity(x)
 
     # Recover w (vertical velocity) through incompressibility
 
