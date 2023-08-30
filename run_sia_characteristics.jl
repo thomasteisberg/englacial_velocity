@@ -3,8 +3,8 @@ using Revise
 using CairoMakie
 using Colors
 using Symbolics
-#using OrderedCollections
 using Dates
+using JLD2
 
 ENV["PYTHON"] = ""
 using PyCall
@@ -32,8 +32,8 @@ println("Outputs will be saved with prefix: $timestr")
 #  ============================
 
 # Domain size
-domain_x = 15000.0 # meters
-domain_z = 1200.0 # meters
+domain_x = 100000.0 # meters
+domain_z = 3000.0 # meters
 
 # Grids for when discretization is needed
 dx = 100.0
@@ -46,7 +46,7 @@ zs = 0.0:dz:domain_z
 @parameters x z
 
 # Define surface geometry
-surface(x) = domain_z - (x / 1000.0)^2.0
+surface(x) = domain_z - ((x / 18000.0)^3.0)
 
 # Build function for surface slope
 
@@ -62,7 +62,7 @@ fig
 ## Generate 2D (x, z) velocity field from SIA model
 #  ================================================
 
-n = 3.0
+n = 4.0
 
 println("n = $n")
 
@@ -108,7 +108,7 @@ end
 #  ===
 
 #layer_ages = 0:100:5000
-layer_ages = 10 .^ (range(0,stop=3,length=20))
+layer_ages = 10 .^ (range(0,stop=4,length=20))
 layers_t0 = advect_layer(u, w, xs, surface, layer_ages*seconds_per_year)
 
 layers_t1 = Vector{Function}(undef, length(layer_ages))
@@ -171,7 +171,7 @@ function dv_ds(v, p, s)
 end
 
 start_pos_x = 10
-prob = ODEProblem(dv_ds, 0, (start_pos_x, domain_x), 1, saveat=100, abstol=1e-12)
+prob = ODEProblem(dv_ds, 0, (start_pos_x, domain_x), 1)
 
 layer_sols = Vector{ODESolution}(undef, length(layers_t0))
 
@@ -246,6 +246,7 @@ end
 g = 9.81 # m/s^2
 x_offset_left, x_offset_right = 8000, 1000
 z_offset_bottom, z_offset_top = 300, 300
+minimum_z_spacing_visc = 10
 
 # Find du/dz from the finite differences along the layer_sols lines
 x_visc = []
@@ -254,13 +255,22 @@ dudz_visc = []
 eff_stress_visc = []
 layer_idxs = []
 stability = []
+delta_zs = []
 
 minimum_z_spacing_visc = 50
 
 for x_pos = x_offset_left:100:(domain_x-x_offset_right)
     last_z = -Inf
-    for layer_idx = 2:1:length(layers_t0)-1
+    for layer_idx = 2:1:length(layers_t0)-2
         z_pos = layers_t0[layer_idx](x_pos)[1]
+
+        delta_z = (layers_t0[layer_idx-1](x_pos)[1] - layers_t0[layer_idx+1](x_pos)[1])
+        if delta_z < minimum_z_spacing_visc
+            continue
+        end
+        if x_pos % 10000 == 0
+            println("Layer Idx: $layer_idx, delta_z: $delta_z, x_pos: $x_pos")
+        end
         if (abs(z_pos - last_z) > minimum_z_spacing_visc) && (z_pos >= z_offset_bottom) && (z_pos <= domain_z - z_offset_top)
             # Estimate du_dz
             dudz_central_diff = (layer_sols[layer_idx-1](x_pos) - layer_sols[layer_idx+1](x_pos)) / ( seconds_per_year * (layers_t0[layer_idx-1](x_pos)[1] - layers_t0[layer_idx+1](x_pos)[1]))
@@ -271,6 +281,7 @@ for x_pos = x_offset_left:100:(domain_x-x_offset_right)
 
             push!(x_visc, x_pos)
             push!(z_visc, z_pos)
+            push!(delta_zs, delta_z)
             push!(dudz_visc, dudz_central_diff)
             push!(eff_stress_visc, rheology_eff_stress)
             push!(layer_idxs, layer_idx)
@@ -286,7 +297,7 @@ dudz_visc[dudz_visc .< 0] .= NaN
 begin
     fig = Figure(resolution=(1000, 1000))
     ax = Axis(fig[1, 1], title="Effective stress vs strain rate (MOL FD)")
-    s = scatter!(ax, log10.(eff_stress_visc), log10.(dudz_visc), markersize=4, color=Float32.(stability))
+    s = scatter!(ax, log10.(eff_stress_visc), log10.(dudz_visc), markersize=4, color=Float32.(delta_zs))
     cb = Colorbar(fig[1,2], s, label="Layer stability")
     stress_xs = 0:0.1:5.5
     A_n3 = 1.658286764403978e-25
@@ -295,12 +306,12 @@ begin
     lines!(ax, stress_xs, 4 .* stress_xs .+ log10(2*A_n4), linestyle=:dash, color=:black)
     A_n2 = 1.658286764403982e-19
     lines!(ax, stress_xs, 2 .* stress_xs .+ log10(2*A_n2), linestyle=:dash, color=:black)
-    xlims!(3, 6)
-    ylims!(-15,-5)
+    #xlims!(3, 6)
+    #ylims!(-15,-5)
     fig
 end
 
-save_figure(fig, "rheology_moc")
+#save_figure(fig, "rheology_moc")
 fig
 
 #  =============================
@@ -311,7 +322,7 @@ fig
 g = 9.81 # m/s^2
 minimum_z_spacing_visc = 10
 
-x_pos = 15e3
+x_pos = 95e3
 x_idx = argmin(abs.(xs .- x_pos))
 
 # Iterate over each layer and find the percentage of points where d2l_dxdz is negative
@@ -382,3 +393,14 @@ begin
 
     fig
 end
+
+save_figure(fig, "rheology_single_x")
+fig
+
+#  =============================
+## Save key results for later plot generation
+#  =============================
+
+filename = "plots/$(timestr)-data.jld2"
+jldsave(filename; domain_x, domain_z, dx, dz, xs, zs, surface, dsdx, n, u, w,
+                    dudx, layers_t0, layers_t1, layer_sols, timestr)
