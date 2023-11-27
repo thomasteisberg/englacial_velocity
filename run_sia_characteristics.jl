@@ -62,7 +62,7 @@ fig
 ## Generate 2D (x, z) velocity field from SIA model
 #  ================================================
 
-n = 4.0
+n = 2.5
 
 println("n = $n")
 
@@ -74,10 +74,18 @@ basal_velocity(x) = u_ref(x, surface(x)) - u_test(x, surface(x))
 
 u, w, dudx = sia_model((x, z), surface, dsdx; n=n, basal_velocity=basal_velocity)
 
+function mask_above_surface(f, xs, zs)
+    values = @. f(xs, zs')
+    Z = zs' .* ones(length(xs))
+    values[Z .> surface.(xs)] .= NaN
+    return values
+end
+
 to_plot = OrderedDict(
-        ("u (Horizontal Velocity)", "u [m/a]") => (@. u(xs, zs')) * seconds_per_year,
-        ("w (Vertical Velocity)", "w [m/a]") => (@. w(xs, zs')) * seconds_per_year,
-        ("du/dx", "du/dx [a^-1]") => (@. dudx(xs, zs')) * seconds_per_year,
+        ("u (Horizontal Velocity)", "u [m/a]") => mask_above_surface(u, xs, zs) * seconds_per_year,
+        #("u (Horizontal Velocity)", "u [m/a]") => (@. u(xs, zs')) * seconds_per_year,
+        ("w (Vertical Velocity)", "w [m/a]") => mask_above_surface(w, xs, zs) * seconds_per_year,
+        #("du/dx", "du/dx [a^-1]") => mask_above_surface(dudx, xs, zs) * seconds_per_year,
     )
 fig = plot_fields(xs, zs, to_plot; surface=surface)
 
@@ -96,9 +104,9 @@ fig
 #  ================
 
 begin
-    fig = Figure(resolution=(1000, 300))
-    ax = Axis(fig[1, 1], title="u(x, surface(x))", ylabel="Horizontal Velocity [m/yr]")
-    lines!(ax, xs, seconds_per_year * @. u(xs, surface(xs)))
+    fig = Figure(resolution=(1000, 500), fontsize=32)
+    ax = Axis(fig[1, 1], title="Surface Horizontal Velocity", ylabel="Horizontal Velocity [m/yr]", xlabel="x [km]")
+    lines!(ax, xs ./ 1000, seconds_per_year * @. u(xs, surface(xs)))
 
     fig
 end
@@ -183,46 +191,51 @@ for p in 2:length(layers_t0)-1
     println(layer_sols[p].retcode)
 end
 
+##
+
 begin
-    fig = Figure(resolution=(1000, 1000))
+    fig = Figure(resolution=(1000, 1000), fontsize=32)
 
     # Solution
-    ax = Axis(fig[1, 1], title="Solutions (points) overlaid on true values (basemap)")
-    crange = (0, 200)
+    ax = Axis(fig[1, 1], title="Horizontal Velocity Solution", xlabel="x [km]", ylabel="z [m]")
+    crange = (0, 50)
 
-    h = heatmap!(ax, xs, zs, (@. u(xs, zs')) .* seconds_per_year, colorrange=crange)
-    cb = Colorbar(fig[1,2], h, label="u [m/yr]")
+    #h = heatmap!(ax, xs ./ 1000, zs, (@. u(xs, zs')) .* seconds_per_year, colorrange=crange)
+    #cb = Colorbar(fig[1,2], h, label="u [m/yr]")
 
+    sc = nothing
     for p in 2:length(layers_t0)-1
-        plot!(ax, layer_sols[p].t, layers_t0[p](layer_sols[p].t), color=layer_sols[p].u, colorrange=crange)
+        sc = plot!(ax, layer_sols[p].t ./ 1000, layers_t0[p](layer_sols[p].t), color=layer_sols[p].u, colorrange=crange)
     end
+    cb = Colorbar(fig[1,2], sc, label="u [m/yr]")
 
     # Error
-    ax = Axis(fig[2, 1], title="Error (predicted - true)")
-    crange = (-5, 5)
+    ax = Axis(fig[2, 1], title="Error (predicted - true)", xlabel="x [km]", ylabel="z [m]")
+    crange = (-1, 1)
     sc = nothing
 
     for p in 2:length(layers_t0)-1
         xs_l = layer_sols[p].t
         zs_l = layers_t0[p](layer_sols[p].t)
         u_true = (@. u(xs_l, zs_l)) .* seconds_per_year
-        global sc = plot!(ax, xs_l, zs_l, color=layer_sols[p].u .- u_true, colorrange=crange, colormap=:RdBu_5)
+        global sc = plot!(ax, xs_l ./ 1000, zs_l, color=layer_sols[p].u .- u_true, colorrange=crange, colormap=:RdBu_5)
     end
     cb = Colorbar(fig[2,2], sc, label="Error [m/yr]")
 
-    # Error
-    ax = Axis(fig[3, 1], title="Error % (predicted - true)/true")
-    crange = (-10, 10)
-    sc = nothing
+    # # Error
+    # ax = Axis(fig[3, 1], title="Error % (predicted - true)/true", xlabel="x [km]", ylabel="z [m]")
+    # crange = (-10, 10)
+    # sc = nothing
 
-    for p in 2:length(layers_t0)-1
-        xs_l = layer_sols[p].t
-        zs_l = layers_t0[p](layer_sols[p].t)
-        u_true = (@. u(xs_l, zs_l)) .* seconds_per_year
-        global sc = plot!(ax, xs_l, zs_l, color=100 * (layer_sols[p].u .- u_true) ./ u_true, colorrange=crange, colormap=:RdBu_5)
-    end
-    cb = Colorbar(fig[3,2], sc, label="Error %")
+    # for p in 2:length(layers_t0)-1
+    #     xs_l = layer_sols[p].t
+    #     zs_l = layers_t0[p](layer_sols[p].t)
+    #     u_true = (@. u(xs_l, zs_l)) .* seconds_per_year
+    #     global sc = plot!(ax, xs_l ./ 1000, zs_l, color=100 * (layer_sols[p].u .- u_true) ./ u_true, colorrange=crange, colormap=:RdBu_5)
+    # end
+    # cb = Colorbar(fig[3,2], sc, label="Error %")
 
+    save_figure(fig, "results")
     fig
 end
 
@@ -257,7 +270,7 @@ layer_idxs = []
 stability = []
 delta_zs = []
 
-minimum_z_spacing_visc = 50
+minimum_z_spacing_visc = 400
 
 for x_pos = x_offset_left:100:(domain_x-x_offset_right)
     last_z = -Inf
@@ -295,23 +308,30 @@ end
 dudz_visc[dudz_visc .< 0] .= NaN
 
 begin
-    fig = Figure(resolution=(1000, 1000))
-    ax = Axis(fig[1, 1], title="Effective stress vs strain rate (MOL FD)")
-    s = scatter!(ax, log10.(eff_stress_visc), log10.(dudz_visc), markersize=4, color=Float32.(delta_zs))
-    cb = Colorbar(fig[1,2], s, label="Layer stability")
+    fig = Figure(resolution=(1000, 1000), fontsize=32)
+    ax = Axis(fig[1, 1], title="Effective stress vs strain rate", xlabel="log(stress)", ylabel="log(strain rate)")
+    s = scatter!(ax, log10.(eff_stress_visc), log10.(dudz_visc), markersize=4) #, color=Float32.(delta_zs))
+    #cb = Colorbar(fig[1,2], s, label="Layer stability")
     stress_xs = 0:0.1:5.5
-    A_n3 = 1.658286764403978e-25
+    A_n2p5 = 1.6582867644039821e-22
+    A_n3p5 = 1.658286764403982e-28
+
+    lines!(ax, stress_xs, 2.5 .* stress_xs .+ log10(2*A_n2p5), linestyle=:dash, color=:black)
     lines!(ax, stress_xs, 3 .* stress_xs .+ log10(2*A_n3), linestyle=:dash, color=:black)
-    A_n4 = 1.658286764403982e-31
-    lines!(ax, stress_xs, 4 .* stress_xs .+ log10(2*A_n4), linestyle=:dash, color=:black)
-    A_n2 = 1.658286764403982e-19
-    lines!(ax, stress_xs, 2 .* stress_xs .+ log10(2*A_n2), linestyle=:dash, color=:black)
-    #xlims!(3, 6)
-    #ylims!(-15,-5)
+    lines!(ax, stress_xs, 3.5 .* stress_xs .+ log10(2*A_n3p5), linestyle=:dash, color=:black)
+
+    # A_n3 = 1.658286764403978e-25
+    # lines!(ax, stress_xs, 3 .* stress_xs .+ log10(2*A_n3), linestyle=:dash, color=:black)
+    # A_n4 = 1.658286764403982e-31
+    # lines!(ax, stress_xs, 4 .* stress_xs .+ log10(2*A_n4), linestyle=:dash, color=:black)
+    # A_n2 = 1.658286764403982e-19
+    # lines!(ax, stress_xs, 2 .* stress_xs .+ log10(2*A_n2), linestyle=:dash, color=:black)
+    xlims!(3.5, 5.5)
+    ylims!(-13,-8)
     fig
 end
 
-#save_figure(fig, "rheology_moc")
+save_figure(fig, "rheology_moc")
 fig
 
 #  =============================
@@ -369,17 +389,19 @@ for layer_idx = 3:1:length(layers_t0)-2
 end
 
 begin
-    fig = Figure(resolution=(1000, 1000))
+    fig = Figure(resolution=(1000, 1000), fontsize=32)
     cmap = cgrad([:red, :red, :black], [0.0, 0.5, 1.0])
     
     zs_u = 0:10.0:surface(x_pos)
     u_true = seconds_per_year .* (@. u(x_pos, zs_u))
     dudz_fd_true = diff(u_true) ./ diff(zs_u)
 
-    ax = Axis(fig[1, 1], title="u")
-    lines!(ax, u_true, zs_u, color=:black, linestyle=:dash)
-    scatter!(ax, u_visc, z_visc, color=stability, colormap=cmap)
+    ax = Axis(fig[1, 1], title="Horizontal Velocity (n=$(n))", xlabel="u [m/yr]", ylabel="Elevation [m]")
+    lines!(ax, u_true, zs_u, color=:black, linestyle=:dash, label="True")
+    scatter!(ax, u_visc, z_visc, label="ODE Result")#, color=stability, colormap=cmap)
     ylims!(ax, 0, surface(x_pos))
+    xlims!(ax, 0, 50)
+    axislegend(ax, position=:lt)
 
     ax = Axis(fig[1, 2], title="dudz")
     lines!(ax, dudz_fd_true, zs_u[1:end-1], color=:black, linestyle=:dash)
