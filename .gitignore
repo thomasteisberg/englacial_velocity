@@ -1,3 +1,4 @@
 plots/
 archive/
 .vscode/
+__pycache__/
