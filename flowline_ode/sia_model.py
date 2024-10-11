@@ -7,7 +7,7 @@ import scipy.integrate
 def sia_model(x_sym, z_sym, surface_sym, dsdx_sym,
               rho=918, g=9.8, A0=3.985e-13, n_A0=3, Q=60e3, R=8.314,
               T_rel_p=(273.15-20), log_ref_stress=6,
-              n=3, basal_velocity_sym=0):
+              n=3, basal_velocity_sym=0, enhancement_factor=1):
     """
     Calculates the horizontal and vertical velocities of ice flow using the
     Shallow Ice Approximation (SIA) model.
@@ -48,9 +48,29 @@ def sia_model(x_sym, z_sym, surface_sym, dsdx_sym,
         log_2A = log_ref_strain_rate - n * log_ref_stress # log10(2*A)
         A = 10**(log_2A) / 2
 
-    # Solve for u (horizontal velocity)
-    u_sym = (-2.0 * A * sympy.Abs(dsdx_sym)**(n-1.0) * dsdx_sym * rho**n * g**n *
-             (surface_sym**(n+1.0) - (surface_sym - z_sym)**(n+1.0)) / (n + 1.0)) + basal_velocity_sym
+    # Solve for u (horizontal velocity) [Eq. 3.92]
+    
+    # Version with assumed constant A
+    # u_sym = (-2.0 * A * sympy.Abs(dsdx_sym)**(n-1.0) * dsdx_sym * rho**n * g**n *
+    #          (surface_sym**(n+1.0) - (surface_sym - z_sym)**(n+1.0)) / (n + 1.0)) + basal_velocity_sym
+
+    # Version with spatially-variable A
+    # u_sym = basal_velocity_sym - (2.0 * (rho * g)**n *
+    #                               sympy.Abs(dsdx_sym)**(n-1.0) * dsdx_sym * 
+    #                               sympy.integrate(A *
+    #                                               (surface_sym - z_sym)**n,
+    #                                               (z_sym, 0, z_sym)) )
+
+
+    if n % 1 != 0:
+        raise ValueError("Flow law exponent n must be an integer")
+    n = int(n)
+
+    u_sym = basal_velocity_sym - (2 * (rho * g)**n *
+                                  sympy.Abs(dsdx_sym)**(n-1) * dsdx_sym * 
+                                  sympy.integrate(enhancement_factor * A *
+                                                  (surface_sym - z_sym)**n,
+                                                  (z_sym, 0, z_sym)) )
     
     # Recover w (vertical velocity) from u through incompressibility
     du_dx_sym = sympy.diff(u_sym, x_sym)
@@ -109,10 +129,11 @@ def advect_layer(u, w, xs, initial_layer, layer_ages, xs_initial=None, max_age_t
     t = 0
     advected_layers = []
     for idx, age in enumerate(layer_ages):
+        print(f"Layer idx {idx}")
         if max_age_timestep is not None:
             while (age-t) > max_age_timestep:
-                #print(f"Requested next step age: {age}, delta: {age - t}, actually taking step of size {max_age_timestep}")
-                sol = scipy.integrate.solve_ivp(ode_fun, [0, max_age_timestep], y, dense_output=True, rtol=1e-8, atol=1e-8)
+                print(f"Requested next step age: {age}, delta: {age - t}, actually taking step of size {max_age_timestep}")
+                sol = scipy.integrate.solve_ivp(ode_fun, [0, max_age_timestep], y, dense_output=True)#, rtol=1e-8, atol=1e-8)
                 xs_advected = sol.y[:len(y)//2, -1]
                 zs_advected = sol.y[len(y)//2:, -1]
 
@@ -122,7 +143,7 @@ def advect_layer(u, w, xs, initial_layer, layer_ages, xs_initial=None, max_age_t
                 y = np.concatenate([xs, layer_interp_for_next_layer(xs)])
                 t += max_age_timestep
 
-        sol = scipy.integrate.solve_ivp(ode_fun, [0, age-t], y, dense_output=True, rtol=1e-8, atol=1e-8)
+        sol = scipy.integrate.solve_ivp(ode_fun, [0, age-t], y, dense_output=False, rtol=1, atol=1)#, rtol=1e-8, atol=1e-8)
         xs_advected = sol.y[:len(y)//2, -1]
         zs_advected = sol.y[len(y)//2:, -1]
 
