@@ -12,7 +12,7 @@ def solve_layer_ode(d2l_dxdz_fn, d2l_dtdz_fn, bounds, initial_velocity, solve_ar
     return scipy.integrate.solve_ivp(du_dtau, bounds, np.array([initial_velocity]), dense_output=True, **solve_args)
 
 
-def solve_all_layers(layers_t0, layer_d2l_dxdz, layer_d2l_dtdz, u, x, z, domain_x, xs_layers, start_pos_x = 0, solve_args={}):
+def solve_all_layers(layers_t0, layer_d2l_dxdz, layer_d2l_dtdz, x, z, domain_x, xs_layers, u = None, start_pos_x = 0, solve_args={}):
 
     # Default solve_args
     if 'max_step' not in solve_args:
@@ -22,7 +22,10 @@ def solve_all_layers(layers_t0, layer_d2l_dxdz, layer_d2l_dtdz, u, x, z, domain_
 
     for idx in tqdm(np.arange(1, len(layers_t0)-1)):
         layer = layers_t0[idx]
-        u0 = u.subs([(x, start_pos_x), (z, layer(start_pos_x))]).evalf() * scipy.constants.year
+        if u:
+            u0 = u.subs([(x, start_pos_x), (z, layer(start_pos_x))]).evalf() * scipy.constants.year
+        else:
+            u0 = 0.0 # Assume zero starting velocity -- generally fine if it's close to being correct
         # If you're extracting points from the solution (for rheology estimates, for example), set max_step to no more than the spacing at which you'll extract points
         # (but if you're just plotting velocity, this will run a lot faster if you let the solver pick a max step size)
         in_lower_guardrails = xs_layers[layer(xs_layers) < 200]

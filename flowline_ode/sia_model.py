@@ -2,7 +2,7 @@ import numpy as np
 import sympy
 import scipy.constants
 import scipy.integrate
-
+import datetime
 
 def sia_model(x_sym, z_sym, surface_sym, dsdx_sym,
               rho=918, g=9.8, A0=3.985e-13, n_A0=3, Q=60e3, R=8.314,
@@ -62,9 +62,9 @@ def sia_model(x_sym, z_sym, surface_sym, dsdx_sym,
     #                                               (z_sym, 0, z_sym)) )
 
 
-    if n % 1 != 0:
-        raise ValueError("Flow law exponent n must be an integer")
-    n = int(n)
+    # if n % 1 != 0:
+    #     raise ValueError("Flow law exponent n must be an integer")
+    # n = int(n)
 
     u_sym = basal_velocity_sym - (2 * (rho * g)**n *
                                   sympy.Abs(dsdx_sym)**(n-1) * dsdx_sym * 
@@ -81,6 +81,80 @@ def sia_model(x_sym, z_sym, surface_sym, dsdx_sym,
     w_sym = sympy.integrate(dw_dz_sym, (z_sym, 0, z_sym))
 
     return u_sym, w_sym, du_dx_sym
+
+
+
+def lambdify_and_vectorize_if_needed(vars, symbolic_expr, warn_if_vectorizing = True, **kwargs):
+    """
+    Acts just like sympy.lambdify() except also calls np.vectorize() on the
+    result if the function lambdify() returns cannot accept vector inputs.
+    (This happens if the returned expression contains an integral. It is not
+    clear to me if this is a bug or the intended behavior. Always applying
+    np.vectorize() isn't a good approach because the result is much slower
+    than the natively vectorized functions from lambdify.)
+    """
+
+    l = sympy.lambdify(vars, symbolic_expr, **kwargs)
+
+    # Figure out how many variables the lambdified function expects
+    # vars may be either a single Symbol or a list of Symbols
+    n_vars = 1
+    try:
+        n_vars = len(vars)
+    except TypeError:
+        n_vars = 1
+
+    test_input = [np.array([1, 1]) for i in range(n_vars)]
+    must_vectorize = False
+    try:
+        test_output = l(*test_input)
+        if len(test_output) != len(test_input[0]):
+            must_vectorize = True
+    except:
+        must_vectorize = True
+
+    if must_vectorize:
+        if warn_if_vectorizing:
+            print(f"Warning: np.vectorize() is being called on the lambdified function {symbolic_expr}.")
+        return np.vectorize(l)
+    
+    return l
+
+def uw_on_grid(xs, zs, u, x, z, basal_velocity_fn, domain_z, return_du_dx_fd=False, verbose=False):
+    dx = xs[1] - xs[0]
+    xs_extended = np.concatenate(([xs[0] - dx], xs, [xs[-1] + dx]))
+    
+    tstamp = datetime.datetime.now()
+
+    du_dz_fn = sympy.lambdify((x, z), sympy.diff(u, z))
+
+    def du_dz_ode(z, u, x):
+        return du_dz_fn(x, z)
+    
+    sol = scipy.integrate.solve_ivp(du_dz_ode, (0, domain_z), basal_velocity_fn(xs_extended), t_eval=zs,
+                                    args=(xs_extended,),
+                                    atol=1e-4/scipy.constants.year, rtol=1e-4/scipy.constants.year)
+    U_extended = np.transpose(sol.y)
+    if verbose:
+        print(f"Shape of U_extended: {U_extended.shape}")
+        print(f"Time to compute U_extended: {datetime.datetime.now() - tstamp}")
+    tstamp = datetime.datetime.now()
+
+    dudx_finite_diff = scipy.signal.correlate(U_extended, np.array([-1, 0, 1])[np.newaxis, :], mode='valid') / (2*(xs[1] - xs[0]))
+    W = np.cumsum(-1*dudx_finite_diff, axis=0) * (zs[1] - zs[0])
+
+    U = U_extended[:, 1:-1]
+
+    if verbose:
+        print(f"len(xs): {len(xs)}, len(zs): {len(zs)}")
+        print(f"Shape of U: {np.shape(U)}")
+        print(f"Shape of W: {np.shape(W)}")
+        print(f"Time to compute W: {datetime.datetime.now() - tstamp}")
+
+    if return_du_dx_fd:
+        return U, W, dudx_finite_diff
+    else:
+        return U, W
 
 
 def advect_layer(u, w, xs, initial_layer, layer_ages, xs_initial=None, max_age_timestep=None):
@@ -129,7 +203,7 @@ def advect_layer(u, w, xs, initial_layer, layer_ages, xs_initial=None, max_age_t
     t = 0
     advected_layers = []
     for idx, age in enumerate(layer_ages):
-        print(f"Layer idx {idx}")
+        #print(f"Layer idx {idx}")
         if max_age_timestep is not None:
             while (age-t) > max_age_timestep:
                 print(f"Requested next step age: {age}, delta: {age - t}, actually taking step of size {max_age_timestep}")
