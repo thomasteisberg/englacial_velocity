@@ -1,0 +1,22 @@
+name: englacial_velocity
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python
+  - bokeh
+  - xarray==2024.6.0
+  - numpy
+  - hvplot
+  - cartopy
+  - geoviews==1.12.0
+  - ca-certificates
+  - certifi
+  - openssl
+  - dask==2024.6.2
+  - selenium
+  - firefox
+  - geckodriver
+  - sympy
+  - scikit-learn
+  - ipykernel

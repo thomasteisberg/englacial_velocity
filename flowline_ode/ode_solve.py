@@ -22,7 +22,7 @@ def solve_all_layers(layers_t0, layer_d2l_dxdz, layer_d2l_dtdz, x, z, domain_x, 
 
     for idx in tqdm(np.arange(1, len(layers_t0)-1)):
         layer = layers_t0[idx]
-        if u:
+        if u is not None:
             u0 = u.subs([(x, start_pos_x), (z, layer(start_pos_x))]).evalf() * scipy.constants.year
         else:
             u0 = 0.0 # Assume zero starting velocity -- generally fine if it's close to being correct
