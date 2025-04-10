@@ -1,3 +1,6 @@
+[![DOI](https://zenodo.org/badge/597215209.svg)](https://doi.org/10.5281/zenodo.15191736)
+
+
 # Measurement of Englacial Velocity Fields with Interferometric Radio Echo Sounders
 
 This code accompanies an in review paper for JGR Earth Surface.
